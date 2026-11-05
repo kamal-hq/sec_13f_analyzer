@@ -12,6 +12,7 @@ from src.analysis import (
     get_etf_convergence_signals,
     get_fund_concentration,
     get_fund_summary,
+    get_new_listing_signals,
     get_sector_by_period,
     get_top_holdings_by_aum,
 )
@@ -33,7 +34,7 @@ def run_pipeline() -> pd.DataFrame:
     Executes the full 13F data pipeline:
     1. Parse and aggregate raw 13F XML files from data/raw/
     2. Map unique CUSIPs to tickers/names via OpenFIGI + cache, and map tickers to SIC sectors
-    3. Detect stock splits, load funds, securities, and split-adjusted holdings into SQLite
+    3. Detect stock splits (confirming via yfinance), load funds, securities, and split-adjusted holdings into SQLite
     4. Export Power BI CSVs to output/
     
     Returns:
@@ -92,7 +93,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     df_pipeline = run_pipeline()
 
-    print("\n=== Detected Stock Splits (2026-Q1 -> 2026-Q2) ===")
+    print("\n=== Detected Stock Splits (Confirmed vs Unconfirmed via yfinance) ===")
     splits_df = detect_splits(df_pipeline)
     print(splits_df.to_string(index=False))
 
@@ -128,20 +129,26 @@ if __name__ == "__main__":
     print("\n=== Top 10 Holdings for Berkshire Hathaway (2026-Q2) ===")
     print(get_fund_concentration("Berkshire Hathaway", "2026-Q2").to_string(index=False))
 
-    print("\n=== Full Universe Convergence Signals (2026-Q2, Top 15, Operating Equities Only) ===")
+    print("\n=== Full Universe Convergence Signals (2026-Q2, Top 15, Issuer-Merged, Excl. New Listings & ETFs) ===")
     full_signals = get_convergence_signals("2026-Q2", min_funds=4)
     print(f"Total full-universe convergence signals (4+ funds): {len(full_signals)}")
     print(full_signals.head(15).to_string(index=False))
 
-    print("\n=== Discretionary Convergence Signals (2026-Q2, Conglomerate/Pension/SWF) ===")
+    print("\n=== Discretionary Convergence Signals (2026-Q2, 3 Discretionary Funds, Issuer-Merged) ===")
     disc_signals = get_convergence_signals("2026-Q2", fund_types=DISCRETIONARY_FUND_TYPES)
     print(f"Total discretionary convergence signals (2+ of 3 discretionary funds): {len(disc_signals)}")
     print(disc_signals.head(15).to_string(index=False))
+
+    print("\n=== New Listings / IPO Allocations (2026-Q2, Separate Table, is_new_listing = 1) ===")
+    new_listings = get_new_listing_signals("2026-Q2", min_funds=3)
+    print(f"Total New Listing / IPO Allocation signals (3+ funds): {len(new_listings)}")
+    print(new_listings.to_string(index=False))
 
     print("\n=== ETF & Index Trust Convergence Signals (2026-Q2, Separate Table) ===")
     etf_signals = get_etf_convergence_signals("2026-Q2", min_funds=3)
     print(f"Total ETF/Index Trust convergence signals (3+ funds): {len(etf_signals)}")
     print(etf_signals.to_string(index=False))
+
 
 
 

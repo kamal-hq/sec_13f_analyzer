@@ -39,8 +39,19 @@ ETF_SQL_CONDITION = """(
     OR UPPER(COALESCE(s.company_name, '')) LIKE '% ETF%'
     OR UPPER(COALESCE(s.company_name, '')) LIKE 'ETF %'
     OR UPPER(COALESCE(s.company_name, '')) LIKE '%INDEX FD%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%INDEX FUND%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%INDEX TRUST%'
     OR UPPER(COALESCE(s.company_name, '')) LIKE '%EXCHANGE TRADED%'
     OR UPPER(COALESCE(s.company_name, '')) LIKE '%EXCH TRADED%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%SERIES TRUST%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%COVINGTON TRUST%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%FLEXSHARES%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%PACER FDS%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%TIDAL TRUST%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%VICTORY PORTFOLIOS%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%KRANESHARES%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%INVESTMENTS ET%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%PIMCO EQUITY%'
     OR UPPER(COALESCE(s.security_class, '')) LIKE '%ETF%'
     OR UPPER(COALESCE(s.ticker, '')) IN (
         'IVV', 'SPY', 'VOO', 'QQQ', 'IWM', 'DIA', 'EEM', 'TLT', 'GLD', 'SLV',
@@ -49,8 +60,26 @@ ETF_SQL_CONDITION = """(
         'IBIT', 'FBTC', 'GBTC', 'ETHA', 'BITO', 'VTI', 'VEA', 'VWO', 'IEFA',
         'EFA', 'AGG', 'BND', 'JNK', 'EMB', 'TIP', 'SHY', 'IEF', 'GOVT', 'MUB',
         'RSP', 'MDY', 'IJR', 'IJH', 'IWF', 'IWD', 'IWO', 'IWN', 'ACWI', 'VXUS',
-        'URA', 'USO', 'UNG', 'KBE', 'KRE', 'XBI', 'XME', 'RWL'
+        'URA', 'USO', 'UNG', 'KBE', 'KRE', 'XBI', 'XME', 'RWL', 'GDX', 'GDXJ'
     )
+)"""
+
+NON_COMMON_EQUITY_SQL_CONDITION = """(
+    UPPER(COALESCE(s.security_class, '')) LIKE '%NOTE%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%DBCV%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%DEBT%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%PFD%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%PREF%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%DEP SHS%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%DEP CM%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%DEP CUM%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%W EXP%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%WARRANT%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%RIGHT%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%UNIT%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%MICROSCTR%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%CAL LKD%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%NT LKD%'
 )"""
 
 
@@ -61,15 +90,18 @@ def get_convergence_signals(
     min_added_value: int = 1_000_000,
     fund_types: list[str] | None = None,
     include_etfs: bool = False,
+    include_new_listings: bool = False,
 ) -> pd.DataFrame:
     """
-    Identifies Smart Money Convergence signals for a reporting period on split-adjusted shares.
+    Identifies Smart Money Convergence signals for a reporting period on split-adjusted shares,
+    merging multiple share classes at the issuer level (6-character CUSIP prefix, e.g., GOOGL+GOOG -> one Alphabet row).
     A fund counts as a "buyer" of a security only if:
       1. Its position is NEW, OR its split-adjusted shares increased by at least min_pct_increase (10%) QoQ, AND
       2. The dollar value added is at least min_added_value ($1,000,000), computed as
          shares_added * current_period_price (where price = value_usd / shares).
-      3. Option positions (put_call = 'Put' or 'Call') and ETFs/index trusts are excluded;
-         only common operating equity counts.
+      3. Option positions (put_call = 'Put' or 'Call'), non-common instruments (notes, preferreds, warrants),
+         ETFs/index trusts, and new listings (where no fund held the security in the prior period) are excluded.
+      4. When an issuer has multiple share classes bought, dollars added are summed and each buying fund is counted once.
 
     Args:
         period (str): The reporting period (e.g., '2026-Q2').
@@ -78,10 +110,11 @@ def get_convergence_signals(
         min_added_value (int): Minimum dollar value added in USD. Defaults to 1_000_000.
         fund_types (list[str] | None): Optional list of fund_type values to filter Dim_Fund.
         include_etfs (bool): If False (default), excludes ETFs and index trusts.
+        include_new_listings (bool): If False (default), excludes new listings (is_new_listing = 1).
 
     Returns:
         pd.DataFrame: Convergence signals with columns:
-            cusip, ticker, company_name, sector, funds_buying, funds, total_dollars_added, fund_type_breakdown.
+            cusip, ticker, company_name, sector, is_new_listing, funds_buying, funds, total_dollars_added, fund_type_breakdown.
     """
     with get_connection() as conn:
         fund_type_clause = ""
@@ -102,7 +135,8 @@ def get_convergence_signals(
                 effective_min_funds = max(2, matching_funds - 1)
 
         params.append(effective_min_funds)
-        etf_clause = "" if include_etfs else f"AND NOT {ETF_SQL_CONDITION}"
+        etf_clause = "" if include_etfs else f"AND NOT {ETF_SQL_CONDITION} AND NOT {NON_COMMON_EQUITY_SQL_CONDITION}"
+        new_listing_clause = "" if include_new_listings else "AND COALESCE(h.is_new_listing, 0) = 0"
 
         query = f"""
             WITH prior_period AS (
@@ -112,11 +146,13 @@ def get_convergence_signals(
             ),
             qualified_buyers AS (
                 SELECT
+                    SUBSTR(s.cusip, 1, 6) AS issuer_id,
                     h.security_id,
                     s.cusip,
                     s.ticker,
                     s.company_name,
                     s.sector,
+                    COALESCE(h.is_new_listing, 0) AS is_new_listing,
                     f.fund_id,
                     f.name AS fund_name,
                     f.fund_type,
@@ -140,38 +176,170 @@ def get_convergence_signals(
                   )
                   AND ((h.shares - COALESCE(prev.shares, 0)) * (CAST(h.value_usd AS REAL) / h.shares)) >= ?
                   {etf_clause}
+                  {new_listing_clause}
                   {fund_type_clause}
             ),
             type_breakdown AS (
                 SELECT
-                    security_id,
+                    issuer_id,
                     GROUP_CONCAT(type_label, ', ') AS fund_type_breakdown
                 FROM (
                     SELECT
-                        security_id,
+                        issuer_id,
                         fund_type || ': ' || COUNT(DISTINCT fund_id) AS type_label
                     FROM qualified_buyers
-                    GROUP BY security_id, fund_type
-                    ORDER BY security_id, COUNT(DISTINCT fund_id) DESC, fund_type ASC
+                    GROUP BY issuer_id, fund_type
+                    ORDER BY issuer_id, COUNT(DISTINCT fund_id) DESC, fund_type ASC
                 )
-                GROUP BY security_id
+                GROUP BY issuer_id
+            ),
+            issuer_meta AS (
+                SELECT
+                    issuer_id,
+                    REPLACE(GROUP_CONCAT(DISTINCT cusip), ',', '/') AS cusip,
+                    REPLACE(GROUP_CONCAT(DISTINCT ticker), ',', '/') AS ticker,
+                    CASE
+                        WHEN COUNT(DISTINCT cusip) > 1 THEN
+                            TRIM(
+                                REPLACE(
+                                    REPLACE(
+                                        REPLACE(
+                                            REPLACE(MIN(company_name), '-CL A', ''),
+                                            '-CL C', ''
+                                        ),
+                                        '- B SHS', ''
+                                    ),
+                                    '-A', ''
+                                )
+                            )
+                        ELSE MIN(company_name)
+                    END AS company_name,
+                    MAX(sector) AS sector,
+                    MIN(is_new_listing) AS is_new_listing
+                FROM (SELECT * FROM qualified_buyers ORDER BY cusip DESC)
+                GROUP BY issuer_id
+            ),
+            issuer_funds AS (
+                SELECT
+                    issuer_id,
+                    COUNT(DISTINCT fund_id) AS funds_buying,
+                    REPLACE(GROUP_CONCAT(DISTINCT fund_name), ',', ', ') AS funds
+                FROM (SELECT * FROM qualified_buyers ORDER BY fund_name ASC)
+                GROUP BY issuer_id
             )
             SELECT
-                qb.cusip,
-                qb.ticker,
-                qb.company_name,
-                qb.sector,
-                COUNT(DISTINCT qb.fund_id) AS funds_buying,
-                GROUP_CONCAT(qb.fund_name, ', ') AS funds,
+                im.cusip,
+                im.ticker,
+                im.company_name,
+                im.sector,
+                im.is_new_listing,
+                ifd.funds_buying,
+                ifd.funds,
                 CAST(ROUND(SUM(qb.added_value_usd), 0) AS INTEGER) AS total_dollars_added,
                 tb.fund_type_breakdown
-            FROM (SELECT * FROM qualified_buyers ORDER BY fund_name) qb
-            JOIN type_breakdown tb ON qb.security_id = tb.security_id
-            GROUP BY qb.security_id, qb.cusip, qb.ticker, qb.company_name, qb.sector, tb.fund_type_breakdown
-            HAVING COUNT(DISTINCT qb.fund_id) >= ?
+            FROM qualified_buyers qb
+            JOIN issuer_meta im ON qb.issuer_id = im.issuer_id
+            JOIN issuer_funds ifd ON qb.issuer_id = ifd.issuer_id
+            JOIN type_breakdown tb ON qb.issuer_id = tb.issuer_id
+            GROUP BY qb.issuer_id, im.cusip, im.ticker, im.company_name, im.sector, im.is_new_listing, ifd.funds_buying, ifd.funds, tb.fund_type_breakdown
+            HAVING ifd.funds_buying >= ?
             ORDER BY funds_buying DESC, total_dollars_added DESC
         """
         return pd.read_sql_query(query, conn, params=tuple(params))
+
+
+def get_new_listing_signals(
+    period: str = "2026-Q2",
+    min_funds: int = 3,
+    min_added_value: int = 1_000_000,
+) -> pd.DataFrame:
+    """
+    Returns New Listings / IPO Allocations (where is_new_listing = 1, meaning NO fund in the sample
+    held the security or issuer in the prior period) accumulated by min_funds or more institutions in the given period.
+    """
+    with get_connection() as conn:
+        query = f"""
+            WITH prior_period AS (
+                SELECT MAX(period) AS prev_period
+                FROM Fact_Holdings
+                WHERE period < ?
+            ),
+            prior_issuers AS (
+                SELECT DISTINCT
+                    SUBSTR(s.cusip, 1, 6) AS issuer_id,
+                    UPPER(COALESCE(s.ticker, '')) AS ticker
+                FROM Fact_Holdings h
+                JOIN Dim_Security s ON h.security_id = s.security_id
+                WHERE h.period = (SELECT prev_period FROM prior_period)
+                  AND h.value_usd > 0
+            ),
+            qualified_buyers AS (
+                SELECT
+                    SUBSTR(s.cusip, 1, 6) AS issuer_id,
+                    s.cusip,
+                    s.ticker,
+                    s.company_name,
+                    s.sector,
+                    COALESCE(h.is_new_listing, 0) AS is_new_listing,
+                    f.fund_id,
+                    f.name AS fund_name,
+                    f.fund_type,
+                    CAST(h.value_usd AS REAL) AS added_value_usd
+                FROM Fact_Holdings h
+                JOIN Dim_Security s ON h.security_id = s.security_id
+                JOIN Dim_Fund f ON h.fund_id = f.fund_id
+                WHERE h.period = ?
+                  AND (h.put_call IS NULL OR h.put_call = '')
+                  AND h.value_usd >= ?
+                  AND h.shares > 0
+                  AND COALESCE(h.is_new_listing, 0) = 1
+                  AND SUBSTR(s.cusip, 1, 6) NOT IN (SELECT issuer_id FROM prior_issuers)
+                  AND (s.ticker IS NULL OR UPPER(s.ticker) NOT IN (SELECT ticker FROM prior_issuers WHERE ticker != ''))
+                  AND NOT {ETF_SQL_CONDITION}
+                  AND NOT {NON_COMMON_EQUITY_SQL_CONDITION}
+            ),
+            type_breakdown AS (
+                SELECT
+                    issuer_id,
+                    GROUP_CONCAT(type_label, ', ') AS fund_type_breakdown
+                FROM (
+                    SELECT
+                        issuer_id,
+                        fund_type || ': ' || COUNT(DISTINCT fund_id) AS type_label
+                    FROM qualified_buyers
+                    GROUP BY issuer_id, fund_type
+                    ORDER BY issuer_id, COUNT(DISTINCT fund_id) DESC, fund_type ASC
+                )
+                GROUP BY issuer_id
+            ),
+            issuer_funds AS (
+                SELECT
+                    issuer_id,
+                    COUNT(DISTINCT fund_id) AS funds_buying,
+                    REPLACE(GROUP_CONCAT(DISTINCT fund_name), ',', ', ') AS funds
+                FROM (SELECT * FROM qualified_buyers ORDER BY fund_name ASC)
+                GROUP BY issuer_id
+            )
+            SELECT
+                REPLACE(GROUP_CONCAT(DISTINCT qb.cusip), ',', '/') AS cusip,
+                REPLACE(GROUP_CONCAT(DISTINCT qb.ticker), ',', '/') AS ticker,
+                MIN(qb.company_name) AS company_name,
+                MAX(qb.sector) AS sector,
+                MIN(qb.is_new_listing) AS is_new_listing,
+                ifd.funds_buying,
+                ifd.funds,
+                CAST(ROUND(SUM(qb.added_value_usd), 0) AS INTEGER) AS total_dollars_added,
+                tb.fund_type_breakdown
+            FROM qualified_buyers qb
+            JOIN issuer_funds ifd ON qb.issuer_id = ifd.issuer_id
+            JOIN type_breakdown tb ON qb.issuer_id = tb.issuer_id
+            GROUP BY qb.issuer_id, ifd.funds_buying, ifd.funds, tb.fund_type_breakdown
+            HAVING ifd.funds_buying >= ?
+            ORDER BY funds_buying DESC, total_dollars_added DESC
+        """
+        return pd.read_sql_query(query, conn, params=(period, period, min_added_value, min_funds))
+
+
 
 
 def get_etf_convergence_signals(

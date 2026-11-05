@@ -225,7 +225,11 @@ def test_redefined_convergence_signals_and_discretionary_subset() -> None:
     )
     assert not disc_df.empty
     assert (disc_df["funds_buying"] >= 2).all()
-    assert "GOOGL" in disc_df["ticker"].values
+    assert "GOOGL/GOOG" in disc_df["ticker"].values
+    alphabet_row = disc_df[disc_df["ticker"] == "GOOGL/GOOG"]
+    assert len(alphabet_row) == 1
+    assert int(alphabet_row.iloc[0]["funds_buying"]) == 2
+    assert int(alphabet_row.iloc[0]["total_dollars_added"]) == 18_665_002_497
 
 
 def test_all_six_sql_queries_execute_cleanly() -> None:
@@ -333,5 +337,58 @@ def test_top_signal_sector_mappings_fixed() -> None:
     assert sector_by_ticker["IT"] == "Technology"
     assert sector_by_ticker["V"] == "Financials"
     assert sector_by_ticker["MA"] == "Financials"
+
+
+def test_is_new_listing_excluded_from_convergence_and_shown_separately() -> None:
+    """
+    Verifies that securities with 0 prior-period holders (e.g., SPCX) have is_new_listing = 1,
+    are excluded from the main convergence signals table, and appear in get_new_listing_signals.
+    """
+    from src.analysis import get_convergence_signals, get_new_listing_signals
+
+    full_signals = get_convergence_signals("2026-Q2", min_funds=4)
+    assert "SPCX" not in full_signals["ticker"].dropna().values
+    assert "84615Q103" not in full_signals["cusip"].values
+
+    new_listings = get_new_listing_signals("2026-Q2", min_funds=2)
+    assert not new_listings.empty
+    assert "SPCX" in new_listings["ticker"].values
+    spcx_row = new_listings[new_listings["ticker"] == "SPCX"].iloc[0]
+    assert int(spcx_row["funds_buying"]) == 4
+    assert int(spcx_row["total_dollars_added"]) == 2_861_656_740
+    assert int(spcx_row["is_new_listing"]) == 1
+
+
+def test_unconfirmed_splits_are_not_applied() -> None:
+    """
+    Verifies that only confirmed splits (KLAC, BKNG, CVNA) are applied to 2026-Q1 share counts,
+    while unconfirmed auto-detected candidates (PSIG, LPCN, CURX, 500767330, SLNH, TDUP, TMCI)
+    retain their unadjusted raw 2026-Q1 share counts in Fact_Holdings.
+    """
+    with get_connection() as conn:
+        # CVNA (146869102) was confirmed 5-for-1: CalPERS raw Q1 183,866 -> 919,330
+        cvna = conn.execute(
+            """
+            SELECT h.shares
+            FROM Fact_Holdings h
+            JOIN Dim_Fund f ON h.fund_id = f.fund_id
+            JOIN Dim_Security s ON h.security_id = s.security_id
+            WHERE f.name = 'CalPERS' AND s.cusip = '146869102' AND h.period = '2026-Q1'
+            """
+        ).fetchone()
+        assert cvna is not None and int(cvna["shares"]) == 183_866 * 5
+
+        # TDUP (88556E102) was UNCONFIRMED (candidate 1-for-2 reverse split):
+        # Two Sigma raw Q1 shares (2,223,507) must remain unadjusted (not divided by 2)
+        tdup = conn.execute(
+            """
+            SELECT h.shares
+            FROM Fact_Holdings h
+            JOIN Dim_Fund f ON h.fund_id = f.fund_id
+            JOIN Dim_Security s ON h.security_id = s.security_id
+            WHERE f.name = 'Two Sigma Investments' AND s.cusip = '88556E102' AND h.period = '2026-Q1'
+            """
+        ).fetchone()
+        assert tdup is not None and int(tdup["shares"]) == 2_223_507
 
 

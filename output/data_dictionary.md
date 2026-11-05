@@ -6,39 +6,43 @@ This document defines the schema, data types, and business definitions for the f
 
 ## 1. `output/convergence_signals.csv`
 
-Contains **2026-Q2 Smart Money Convergence Signals** across the full 7-fund institutional universe (`min_funds = 4`).
-A fund counts as a qualified **buyer** of a security only if:
-1. The holding is common equity (`put_call IS NULL OR put_call = ''`, excluding Put/Call option rows),
-2. The position was newly initiated (`qoq_change_flag = 'NEW'`) **or** its share count increased by at least **10% QoQ** (`(q2_shares - q1_shares) / q1_shares >= 0.10`), **and**
+Contains **2026-Q2 Smart Money Convergence Signals** across the full 7-fund institutional universe (`min_funds = 4`), merged at the 6-character CUSIP issuer level (e.g., `GOOGL` + `GOOG` merged into one `ALPHABET INC` row).
+A fund counts as a qualified **buyer** of an operating common-equity security only if:
+1. The holding is operating common equity (`put_call IS NULL OR put_call = ''`, excluding options, notes/preferreds/warrants, ETFs/index trusts, and new listings where `is_new_listing = 1`),
+2. The position was newly initiated (`qoq_change_flag = 'NEW'`) **or** its split-adjusted share count increased by at least **10% QoQ** (`(q2_shares - q1_split_adj_shares) / q1_split_adj_shares >= 0.10`), **and**
 3. The dollar value of the added shares at Q2 prices (`shares_added * (q2_value_usd / q2_shares)`) is at least **$1,000,000**.
+4. Multiple share classes of the same issuer (`SUBSTR(cusip, 1, 6)`) are merged into a single row: `total_dollars_added` is summed across share classes and each buying fund is counted once.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `cusip` | `STRING (9)` | 9-character CUSIP (or CINS) security identifier from the SEC Form 13F information table. |
-| `ticker` | `STRING` | Exchange ticker symbol mapped via OpenFIGI / SEC EDGAR (`data/mappings/cusip_cache.json`). |
+| `cusip` | `STRING` | 9-character CUSIP (or `/`-delimited CUSIPs when multiple share classes of the same issuer are merged, e.g., `02079K305/02079K107`). |
+| `ticker` | `STRING` | Exchange ticker symbol (or `/`-delimited tickers when multiple share classes are merged, e.g., `GOOGL/GOOG`). |
 | `company_name` | `STRING` | Canonical issuer name mapped from OpenFIGI with fallback to the 13F XML `<nameOfIssuer>`. |
 | `sector` | `STRING` | Broad sector group mapped from the issuer's SEC EDGAR Standard Industrial Classification (SIC) code (`data/mappings/sector_cache.json`), with `'Unknown'` fallback. |
-| `funds_buying` | `INTEGER` | Count of distinct institutional funds (`>= 4`) meeting the convergence buyer criteria in `2026-Q2`. |
-| `funds` | `STRING` | Alphabetically sorted, comma-separated list of the buying funds' names. |
-| `total_dollars_added` | `INTEGER` | Sum of dollar value added (`shares_added * Q2_price`) across all qualified buying funds in USD. |
-| `fund_type_breakdown` | `STRING` | Breakdown of qualified buying funds by `Dim_Fund.fund_type` (e.g., `Hedge Fund: 3, Public Pension Fund: 1, Sovereign Wealth Fund: 1`). |
+| `is_new_listing` | `INTEGER` | `1` if no fund in the sample held the security in the prior period (`2026-Q1`); `0` otherwise. Main convergence tables exclude `is_new_listing = 1` (which are reported in the separate New Listings / IPO Allocations table). |
+| `funds_buying` | `INTEGER` | Count of distinct institutional funds (`>= 4`) meeting the convergence buyer criteria in `2026-Q2` (each fund counted once per issuer). |
+| `funds` | `STRING` | Alphabetically sorted, comma-separated list of the distinct buying funds' names. |
+| `total_dollars_added` | `INTEGER` | Sum of dollar value added (`shares_added * Q2_price`) across all qualified buying funds and share classes in USD. |
+| `fund_type_breakdown` | `STRING` | Breakdown of distinct qualified buying funds by `Dim_Fund.fund_type` (e.g., `Hedge Fund: 3, Public Pension Fund: 1, Sovereign Wealth Fund: 1`). |
 
 ---
 
 ## 2. `output/discretionary_signals.csv`
 
-Contains **2026-Q2 Discretionary Smart Money Convergence Signals** restricted to fundamental/long-horizon institutions (`fund_types = ['Conglomerate', 'Public Pension Fund', 'Sovereign Wealth Fund']`, i.e., Berkshire Hathaway, CalPERS, and Temasek Holdings, where `2+` of the 3 discretionary funds meet the buyer criteria). Uses the same buyer qualification criteria and schema as `convergence_signals.csv`.
+Contains **2026-Q2 Discretionary Smart Money Convergence Signals** restricted to the 3 fundamental/long-horizon institutions (`fund_types = ['Conglomerate', 'Public Pension Fund', 'Sovereign Wealth Fund']`, i.e., Berkshire Hathaway, CalPERS, and Temasek Holdings, where `2+` of the 3 discretionary funds meet the buyer criteria). Uses the same issuer-level share-class merging (`GOOGL/GOOG` merged into one `ALPHABET INC` row), `is_new_listing = 0` filter, and schema as `convergence_signals.csv`.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `cusip` | `STRING (9)` | 9-character CUSIP (or CINS) security identifier. |
-| `ticker` | `STRING` | Exchange ticker symbol. |
+| `cusip` | `STRING` | 9-character CUSIP (or `/`-delimited CUSIPs when multiple share classes of the same issuer are merged, e.g., `02079K305/02079K107`). |
+| `ticker` | `STRING` | Exchange ticker symbol (or `/`-delimited tickers when multiple share classes are merged, e.g., `GOOGL/GOOG`). |
 | `company_name` | `STRING` | Canonical issuer name. |
 | `sector` | `STRING` | Broad sector group mapped from the issuer's SEC EDGAR SIC code (`'Unknown'` fallback). |
-| `funds_buying` | `INTEGER` | Count of distinct discretionary funds (`>= 2` of 3) meeting the buyer criteria in `2026-Q2`. |
-| `funds` | `STRING` | Comma-separated list of the discretionary buying funds. |
-| `total_dollars_added` | `INTEGER` | Sum of dollar value added (`shares_added * Q2_price`) across the qualified discretionary buyers in USD. |
-| `fund_type_breakdown` | `STRING` | Breakdown of discretionary buying funds by `Dim_Fund.fund_type` (e.g., `Conglomerate: 1, Sovereign Wealth Fund: 1`). |
+| `is_new_listing` | `INTEGER` | `0` for seasoned listings held in the prior period (`1` for new listings/IPOs, excluded from main table). |
+| `funds_buying` | `INTEGER` | Count of distinct discretionary funds (`>= 2` of 3) meeting the buyer criteria in `2026-Q2` (each fund counted once per issuer). |
+| `funds` | `STRING` | Comma-separated list of the distinct discretionary buying funds. |
+| `total_dollars_added` | `INTEGER` | Sum of dollar value added (`shares_added * Q2_price`) across the qualified discretionary buyers and share classes in USD. |
+| `fund_type_breakdown` | `STRING` | Breakdown of distinct discretionary buying funds by `Dim_Fund.fund_type` (e.g., `Conglomerate: 1, Sovereign Wealth Fund: 1`). |
+
 
 ---
 

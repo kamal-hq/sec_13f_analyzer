@@ -92,7 +92,8 @@ def create_schema() -> None:
                 value_usd INTEGER,
                 shares INTEGER,
                 pct_of_portfolio REAL,
-                qoq_change_flag TEXT CHECK(qoq_change_flag IN ('NEW','INCREASED','DECREASED','EXITED','UNCHANGED'))
+                qoq_change_flag TEXT CHECK(qoq_change_flag IN ('NEW','INCREASED','DECREASED','EXITED','UNCHANGED')),
+                is_new_listing INTEGER
             );
 
             CREATE VIEW IF NOT EXISTS View_Exited_Positions AS
@@ -116,10 +117,13 @@ def create_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_fact_security ON Fact_Holdings(security_id);
             """
         )
-        # Ensure security_class column exists if migrating an older Dim_Security table
-        cols = [r["name"] for r in conn.execute("PRAGMA table_info(Dim_Security)").fetchall()]
-        if "security_class" not in cols:
+        # Ensure security_class and is_new_listing columns exist if migrating an older database
+        sec_cols = [r["name"] for r in conn.execute("PRAGMA table_info(Dim_Security)").fetchall()]
+        if "security_class" not in sec_cols:
             conn.execute("ALTER TABLE Dim_Security ADD COLUMN security_class TEXT")
+        fact_cols = [r["name"] for r in conn.execute("PRAGMA table_info(Fact_Holdings)").fetchall()]
+        if "is_new_listing" not in fact_cols:
+            conn.execute("ALTER TABLE Fact_Holdings ADD COLUMN is_new_listing INTEGER")
     logger.info("Star schema verified at %s", DB_PATH)
 
 
@@ -220,6 +224,7 @@ def insert_holding(
     pct_of_portfolio: float,
     qoq_change_flag: str | None,
     put_call: str | None = None,
+    is_new_listing: int | None = None,
     _conn: sqlite3.Connection | None = None,
 ) -> None:
     """
@@ -234,6 +239,7 @@ def insert_holding(
         pct_of_portfolio (float): Percentage of portfolio.
         qoq_change_flag (str | None): QoQ change flag (None/NULL for earliest period).
         put_call (str | None): Optional option indicator ('Put' or 'Call', None for equity).
+        is_new_listing (int | None): 1 if no fund held the security in the prior period, 0 otherwise, None for earliest period.
     """
     own_conn = _conn is None
     conn = _conn if _conn is not None else get_connection()
@@ -241,10 +247,20 @@ def insert_holding(
         conn.execute(
             """
             INSERT INTO Fact_Holdings (
-                fund_id, security_id, period, put_call, value_usd, shares, pct_of_portfolio, qoq_change_flag
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                fund_id, security_id, period, put_call, value_usd, shares, pct_of_portfolio, qoq_change_flag, is_new_listing
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (fund_id, security_id, period, put_call, value_usd, shares, pct_of_portfolio, qoq_change_flag),
+            (
+                fund_id,
+                security_id,
+                period,
+                put_call,
+                value_usd,
+                shares,
+                pct_of_portfolio,
+                qoq_change_flag,
+                is_new_listing,
+            ),
         )
         if own_conn:
             conn.commit()
@@ -253,13 +269,40 @@ def insert_holding(
             conn.close()
 
 
+def _confirm_split_with_yfinance(ticker: str | None, expected_factor: float) -> tuple[str, str | None]:
+    """
+    Checks yfinance split history for `ticker` between 2026-Q1 and 2026-Q2 period-ends
+    (2026-03-25 through 2026-07-05) to confirm an auto-detected stock split.
+    Returns (confirmation_status, split_date) where confirmation_status is 'CONFIRMED' or 'UNCONFIRMED'.
+    """
+    if not ticker or pd.isna(ticker) or str(ticker).strip() in ("", "None"):
+        return "UNCONFIRMED", None
+    try:
+        import yfinance as yf
+
+        splits = yf.Ticker(str(ticker).strip()).splits
+        if splits is None or len(splits) == 0:
+            return "UNCONFIRMED", None
+        for dt, ratio in splits.items():
+            dt_str = str(dt)[:10]
+            if "2026-03-25" <= dt_str <= "2026-07-05":
+                r = float(ratio)
+                if r > 0 and abs(r - expected_factor) / expected_factor <= 0.10:
+                    return "CONFIRMED", dt_str
+        return "UNCONFIRMED", None
+    except Exception as exc:
+        logger.warning("yfinance split check failed for %s: %s", ticker, exc)
+        return "UNCONFIRMED", None
+
+
 def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
     """
     Detects stock splits (forward and reverse) between the prior period and current period.
     For each CUSIP, computes implied price per share (value/shares) per period using the median
     across funds. If the Q1/Q2 price ratio is within 5% of a common split factor
     (2, 3, 4, 5, 8, 10, 15, 20, 25, 30) and median shares move inversely in proportion to the split,
-    flags a split. Ground-truth entries in SPLIT_OVERRIDES override auto-detection.
+    flags a candidate split and confirms it against yfinance split history.
+    Ground-truth entries in SPLIT_OVERRIDES are always marked CONFIRMED.
 
     Args:
         df (pd.DataFrame): Holdings DataFrame containing cusip, period, value/value_usd, shares, put_call.
@@ -267,6 +310,7 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: Detected splits with columns:
             cusip, ticker, company_name, split_factor, split_type, detection_source,
+            confirmation_status, split_date,
             q1_median_price, q2_median_price, price_ratio_q1_q2, q1_median_shares, q2_median_shares, share_ratio_q2_q1.
     """
     work = df.copy()
@@ -310,6 +354,8 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
     q2_sh = eq[eq["period"] == p_curr].set_index(["cusip", "fund_cik"])["shares"]
     matched_sr = (q2_sh / q1_sh).dropna().groupby("cusip").median()
 
+    override_dates = {"482480100": "2026-06-11", "09857L108": "2026-04-02"}
+
     detected_rows: list[dict] = []
     for cusip, row in stats.iterrows():
         p1 = float(row[("med_price", p_prev)])
@@ -337,6 +383,8 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
                     "split_factor": factor,
                     "split_type": split_label,
                     "detection_source": "OVERRIDE",
+                    "confirmation_status": "CONFIRMED",
+                    "split_date": override_dates.get(cusip, "OVERRIDE"),
                     "q1_median_price": round(p1, 2),
                     "q2_median_price": round(p2, 2),
                     "price_ratio_q1_q2": round(pr, 3),
@@ -350,6 +398,7 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
         for f in COMMON_SPLIT_FACTORS:
             # Forward split: Q1/Q2 price ratio within 5% of f, and median shares move inversely (~f)
             if abs(pr - f) / f <= 0.05 and sr > 1.0 and abs(sr - f) / f <= 0.30 and abs(msr - f) / f <= 0.25:
+                status, s_date = _confirm_split_with_yfinance(ticker, float(f))
                 detected_rows.append(
                     {
                         "cusip": cusip,
@@ -358,6 +407,8 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
                         "split_factor": float(f),
                         "split_type": f"{f}-for-1",
                         "detection_source": "AUTO",
+                        "confirmation_status": status,
+                        "split_date": s_date,
                         "q1_median_price": round(p1, 2),
                         "q2_median_price": round(p2, 2),
                         "price_ratio_q1_q2": round(pr, 3),
@@ -373,6 +424,7 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
             inv_sr = 1.0 / sr if sr > 0 else 0.0
             inv_msr = 1.0 / msr if msr > 0 else 0.0
             if abs(inv_pr - f) / f <= 0.05 and sr < 1.0 and abs(inv_sr - f) / f <= 0.30 and abs(inv_msr - f) / f <= 0.25:
+                status, s_date = _confirm_split_with_yfinance(ticker, 1.0 / float(f))
                 detected_rows.append(
                     {
                         "cusip": cusip,
@@ -381,6 +433,8 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
                         "split_factor": 1.0 / float(f),
                         "split_type": f"1-for-{f} (Reverse)",
                         "detection_source": "AUTO",
+                        "confirmation_status": status,
+                        "split_date": s_date,
                         "q1_median_price": round(p1, 2),
                         "q2_median_price": round(p2, 2),
                         "price_ratio_q1_q2": round(pr, 3),
@@ -393,15 +447,18 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.DataFrame(detected_rows)
     if not out.empty:
-        out = out.sort_values(["detection_source", "split_factor", "cusip"], ascending=[False, False, True]).reset_index(drop=True)
+        out = out.sort_values(
+            ["confirmation_status", "detection_source", "split_factor", "cusip"],
+            ascending=[True, False, False, True],
+        ).reset_index(drop=True)
     return out
 
 
 def apply_split_adjustments(df: pd.DataFrame, splits_df: pd.DataFrame | None = None) -> pd.DataFrame:
     """
-    Adjusts prior-period (Q1) share counts by multiplying by split_factor for forward splits
-    (and dividing by the reverse factor for reverse splits, where split_factor = 1/f) so that
-    all QoQ share comparisons and qoq_change_flag calculations are on a split-adjusted basis.
+    Adjusts prior-period (Q1) share counts ONLY for confirmed splits (SPLIT_OVERRIDES plus
+    auto-detected splits confirmed against yfinance split history). Unconfirmed auto-detected
+    candidates are logged and NOT applied.
     """
     work = df.copy()
     if splits_df is None:
@@ -414,7 +471,23 @@ def apply_split_adjustments(df: pd.DataFrame, splits_df: pd.DataFrame | None = N
         return work
     prior_period = periods[0]
 
-    split_map: dict[str, float] = dict(zip(splits_df["cusip"], splits_df["split_factor"]))
+    unconfirmed = splits_df[splits_df["confirmation_status"] != "CONFIRMED"]
+    for _, u_row in unconfirmed.iterrows():
+        logger.warning(
+            "Skipping unconfirmed auto-detected split: CUSIP=%s, ticker=%s (%s), candidate=%s (Q1=$%.2f -> Q2=$%.2f)",
+            u_row["cusip"],
+            u_row["ticker"],
+            u_row["company_name"],
+            u_row["split_type"],
+            u_row["q1_median_price"],
+            u_row["q2_median_price"],
+        )
+
+    confirmed = splits_df[splits_df["confirmation_status"] == "CONFIRMED"]
+    if confirmed.empty:
+        return work
+
+    split_map: dict[str, float] = dict(zip(confirmed["cusip"], confirmed["split_factor"]))
     mask = (work["period"] == prior_period) & (work["cusip"].isin(split_map)) & (work["shares"] > 0)
 
     if mask.any():
@@ -423,19 +496,21 @@ def apply_split_adjustments(df: pd.DataFrame, splits_df: pd.DataFrame | None = N
             (work.loc[mask, "shares"] * factors).round().astype("int64").clip(lower=1)
         )
         logger.info(
-            "Applied stock split adjustments to %d prior-period (%s) holding rows across %d split CUSIPs.",
+            "Applied confirmed stock split adjustments to %d prior-period (%s) holding rows across %d confirmed split CUSIPs (%d unconfirmed skipped).",
             int(mask.sum()),
             prior_period,
             len(split_map),
+            len(unconfirmed),
         )
     return work
 
 
 def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Applies stock-split adjustments to prior-period shares, then computes pct_of_portfolio
-    per (fund_cik, period) and qoq_change_flag (NULL for earliest period; NEW, INCREASED,
-    DECREASED, EXITED, UNCHANGED for subsequent periods) on split-adjusted shares.
+    Applies confirmed stock-split adjustments to prior-period shares, then computes pct_of_portfolio
+    per (fund_cik, period), qoq_change_flag (NULL for earliest period; NEW, INCREASED,
+    DECREASED, EXITED, UNCHANGED for subsequent periods) on split-adjusted shares, and
+    is_new_listing (1 when NO fund held the security in the prior period, 0 otherwise, NULL for earliest period).
     """
     work = df.copy()
     if "value_usd" not in work.columns and "value" in work.columns:
@@ -446,8 +521,15 @@ def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
         lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None
     )
 
-    # Adjust Q1 shares for stock splits before computing QoQ share changes and qoq_change_flag
+    # Adjust Q1 shares for confirmed stock splits before computing QoQ share changes and qoq_change_flag
     work = apply_split_adjustments(work)
+
+    # Identify CUSIPs held by ANY fund in each period so we can flag is_new_listing
+    all_periods = sorted(work["period"].unique())
+    held_cusips_by_period: dict[str, set[str]] = {}
+    for p in all_periods:
+        sub_p = work[(work["period"] == p) & (work["value_usd"] > 0) & (work["shares"] > 0)]
+        held_cusips_by_period[p] = set(sub_p["cusip"].unique())
 
     # Compute pct_of_portfolio per fund per period
     period_totals = work.groupby(["fund_cik", "period"])["value_usd"].transform("sum")
@@ -465,10 +547,21 @@ def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
             curr_df = fund_df[fund_df["period"] == period].copy()
             curr_lookup: dict[tuple[str, str | None], dict] = {}
             flags: list[str | None] = []
+            new_listing_flags: list[int | None] = []
+
+            p_idx = all_periods.index(period)
+            prior_held_cusips: set[str] | None = (
+                held_cusips_by_period[all_periods[p_idx - 1]] if p_idx > 0 else None
+            )
 
             for row in curr_df.to_dict("records"):
                 key = (row["cusip"], row["put_call"])
                 curr_lookup[key] = row
+                if prior_held_cusips is None:
+                    new_listing_flags.append(None)
+                else:
+                    new_listing_flags.append(0 if row["cusip"] in prior_held_cusips else 1)
+
                 if prev_lookup is None:
                     # Earliest period has no prior quarter to compare against -> NULL in SQLite
                     flags.append(None)
@@ -484,6 +577,7 @@ def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
                         flags.append("UNCHANGED")
 
             curr_df["qoq_change_flag"] = flags
+            curr_df["is_new_listing"] = new_listing_flags
             result_frames.append(curr_df)
 
             # Generate EXITED records with value_usd=0 and shares=0 for positions present in prior period but absent now
@@ -498,6 +592,7 @@ def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
                         exited["shares"] = 0
                         exited["pct_of_portfolio"] = 0.0
                         exited["qoq_change_flag"] = "EXITED"
+                        exited["is_new_listing"] = 0
                         exited_rows.append(exited)
                 if exited_rows:
                     result_frames.append(pd.DataFrame(exited_rows))
@@ -561,13 +656,14 @@ def bulk_insert_holdings(df: pd.DataFrame) -> None:
                     _conn=conn,
                 )
 
-
             # 4. Insert all holdings into Fact_Holdings
             for row in enriched_df.to_dict("records"):
                 put_call_val = row.get("put_call")
                 put_call_clean = str(put_call_val) if pd.notna(put_call_val) and put_call_val is not None else None
                 flag_val = row.get("qoq_change_flag")
                 flag_clean = str(flag_val) if pd.notna(flag_val) and flag_val is not None else None
+                new_list_val = row.get("is_new_listing")
+                new_list_clean = int(new_list_val) if pd.notna(new_list_val) and new_list_val is not None else None
                 insert_holding(
                     fund_id=fund_ids[row["fund_cik"]],
                     security_id=security_ids[row["cusip"]],
@@ -577,6 +673,7 @@ def bulk_insert_holdings(df: pd.DataFrame) -> None:
                     pct_of_portfolio=float(row["pct_of_portfolio"]),
                     qoq_change_flag=flag_clean,
                     put_call=put_call_clean,
+                    is_new_listing=new_list_clean,
                     _conn=conn,
                 )
 
@@ -586,7 +683,6 @@ def bulk_insert_holdings(df: pd.DataFrame) -> None:
             )
 
         logger.info(
-
             "Loaded %d funds, %d securities, and %d holding records into %s",
             len(fund_ids),
             len(security_ids),
@@ -601,4 +697,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     create_schema()
     logging.info("Database schema confirmed/created.")
+
 
