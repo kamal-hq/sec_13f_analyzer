@@ -8,10 +8,10 @@
 
 ## Executive Summary
 
-**Lead Finding — Broad Convergence Is Dominated by Quantitative Funds; Discretionary Convergence (`3`-Fund Sample) Is More Informative**:  
-Across our 7-fund institutional sample, 4 of the 7 managers are high-breadth quantitative or multi-manager hedge funds (`Citadel Advisors`, `Two Sigma Investments`, `Renaissance Technologies`, and `Bridgewater Associates`). Consequently, broad full-universe convergence (`min_funds = 4`, seasoned operating equities) is heavily dominated by quantitative turnover: **`31` of the `56` full-universe convergence signals (`55.4%`) are pure `Hedge Fund: 4` signals** with zero participation from long-horizon discretionary managers, and **all `56` signals require at least 2 hedge funds**. Isolating the discretionary subset (`Conglomerate`, `Public Pension Fund`, and `Sovereign Wealth Fund`—while explicitly noting that **our discretionary sample comprises only `3` funds**: `Berkshire Hathaway`, `CalPERS`, and `Temasek Holdings`) produces a cleaner, higher-conviction fundamental signal (`9` issuer-level signals with `2+` of `3` buying, `7` of which do not appear in the 56-stock full list), headlined by merged **`GOOGL/GOOG` (`ALPHABET INC`, `+$18,665,002,497` added across Class A and Class C by `Berkshire Hathaway` and `Temasek Holdings`)** and **`C` (`CITIGROUP INC`, `+$226,493,349` added by `CalPERS` and `Temasek Holdings`)**.
+**Lead Finding — Broad Convergence Is Dominated by Hedge-Fund-Only Signals; Discretionary Convergence (`3`-Fund Sample) Is More Informative**:  
+Across our 7-fund institutional sample, 4 of the 7 managers are high-breadth hedge funds (`Citadel Advisors`, `Two Sigma Investments`, `Renaissance Technologies`, and `Bridgewater Associates`). Consequently, broad full-universe convergence (`min_funds = 4`, seasoned operating equities) is dominated by **hedge-fund-only** signals: **`31` of the `56` full-universe convergence signals (`55.4%`) are hedge-fund-only (`Hedge Fund: 4`)** with zero participation from long-horizon discretionary managers, and **all `56` signals require at least 2 hedge funds**. Isolating the discretionary subset (`Conglomerate`, `Public Pension Fund`, and `Sovereign Wealth Fund`—while explicitly noting that **our discretionary sample comprises only `3` funds**: `Berkshire Hathaway`, `CalPERS`, and `Temasek Holdings`) produces a more informative fundamental signal (`9` issuer-level signals with `2+` of `3` buying, `7` of which do not appear in the 56-stock full list), headlined by merged **`GOOGL/GOOG` (`ALPHABET INC`, `+$18,665,002,497` added across Class A `$9,618,617,481` and Class C `$9,046,385,016` by `Berkshire Hathaway` `$17,110,074,056` and `Temasek Holdings` `$1,554,928,442`)** and **`C` (`CITIGROUP INC`, `+$226,493,349` added by `CalPERS` and `Temasek Holdings`)**.
 
-Across all 7 institutions, total 13F assets under management grew from **`$1,284,805,723,954`** in `2026-Q1` (`$803,285,214,028` excluding options) to **`$1,624,015,283,814`** in `2026-Q2` (`$917,153,241,621` excluding options). Applying our refined convergence methodology—merging multiple share classes at the 6-character CUSIP issuer level, adjusting prior-quarter shares only for **`yfinance`-confirmed stock splits** (`BKNG` 25-for-1, `KLAC` 10-for-1, `CVNA` 5-for-1), and separating both ETFs/index trusts and **new listings (`is_new_listing = 1`)** into dedicated tables—identifies **`56`** seasoned full-universe convergence signals led by **`AMD` (`5` funds, `+$1,195,133,634` added)**, **`WFC` (`5` funds, `+$903,048,556` added)**, **`CBRE` (`5` funds, `+$268,148,933` added)**, **`FORM` (`5` funds, `+$119,590,856` added)**, and **`STX` (`4` funds, `+$1,333,294,180` added)**, while **`SPCX` (`SPACE EXPLORATION TECHNOLOGIES CORP`, `4` funds, `+$2,861,656,740` added)** leads the separate **New Listings / IPO Allocations** table.
+Across all 7 institutions, total 13F assets under management grew from **`$1,284,805,723,954`** in `2026-Q1` (`$803,285,214,028` excluding options) to **`$1,624,015,283,814`** in `2026-Q2` (`$917,153,241,621` excluding options). Applying our refined convergence methodology—merging multiple share classes at the 6-character CUSIP issuer level, adjusting prior-quarter shares only for **`yfinance`-confirmed stock splits** (`BKNG` 25-for-1, `KLAC` 10-for-1, `CVNA` 5-for-1, cached in `data/mappings/split_cache.json`), and separating both ETFs/index trusts and **"New to the sample (no prior-quarter holders)"** positions (`is_new_listing = 1`) into dedicated tables—identifies **`56`** seasoned full-universe convergence signals led by **`AMD` (`5` funds, `+$1,195,133,634` added)**, **`WFC` (`5` funds, `+$903,048,556` added)**, **`CBRE` (`5` funds, `+$268,148,933` added)**, **`FORM` (`5` funds, `+$119,590,856` added)**, and **`STX` (`4` funds, `+$1,333,294,180` added)**, while newly established positions in **`SPCX` (`SPACE EXPLORATION TECHNOLOGIES CORP`, `4` funds, `+$2,861,656,740` added)** lead the separate **"New to the sample (no prior-quarter holders)"** table (`output/new_positions_signals.csv`).
 
 ---
 
@@ -30,25 +30,56 @@ Institutional investment managers exercising discretion over `$100M+` in Section
 | **Bridgewater Associates** | `0001350694` | Hedge Fund | `0001350694-26-000002` | `0001350694-26-000003` |
 
 - **Cover-Page Reconciliation & Multi-Manager Aggregation**: All 14 filings (`52,269` raw XML `<infoTable>` rows) are aggregated by `(fund_cik, period, cusip, put_call)` into `46,865` active holding rows (`plus 3,446 EXITED tracking rows = 50,311 rows in Fact_Holdings`), reconciling with `$0` variance against each filing's cover-page `<tableValueTotal>`.
-- **Stock Split Detection & `yfinance` Confirmation (`src/database.py::detect_splits`)**: Corporate stock splits between `2026-Q1` and `2026-Q2` inflate post-split Q2 share counts relative to pre-split Q1 share counts. The pipeline flags candidate splits when the median implied price ratio (`Q1_price / Q2_price`) across funds is within 5% of a standard split factor `(2, 3, 4, 5, 8, 10, 15, 20, 25, 30)` and median shares move inversely, then verifies each auto-detected candidate against `yfinance` split history (`Ticker(symbol).splits`). Only **`CONFIRMED`** splits plus ground-truth `SPLIT_OVERRIDES` (`BKNG` 25-for-1, `KLAC` 10-for-1, `CVNA` 5-for-1) are applied (`25` Q1 holding rows adjusted); **`UNCONFIRMED`** candidates (`PSIG`, `LPCN`, `CURX`, `500767330`, `SLNH`, `TDUP`, `TMCI`) are logged as warnings and **not** applied.
+- **Stock Split Detection, `yfinance` Confirmation & Caching (`src/database.py::detect_splits`)**: Corporate stock splits between `2026-Q1` and `2026-Q2` inflate post-split Q2 share counts relative to pre-split Q1 share counts. The pipeline flags candidate splits when the median implied price ratio (`Q1_price / Q2_price`) across funds is within 5% of a standard split factor `(2, 3, 4, 5, 8, 10, 15, 20, 25, 30)` and median shares move inversely, then verifies each auto-detected candidate against `yfinance` split history (`Ticker(symbol).splits`) and caches results in `data/mappings/split_cache.json` (falling back to the cache and logging when a network call fails). Only **`CONFIRMED`** splits plus ground-truth `SPLIT_OVERRIDES` (`BKNG` 25-for-1, `KLAC` 10-for-1, `CVNA` 5-for-1) are applied (`25` Q1 holding rows adjusted); **`UNCONFIRMED`** candidates (`PSIG`, `LPCN`, `CURX`, `500767330`, `SLNH`, `TDUP`, `TMCI`) are logged as warnings and **not** applied.
 - **Issuer-Level Share Class Merging (`SUBSTR(cusip, 1, 6)`)**: Operating common-equity share classes sharing the same 6-character CUSIP issuer number (`02079K` for `GOOGL` + `GOOG` -> `ALPHABET INC`; `71654V` for `PBR` ADRs -> `PETROLEO BRASILEIRO S A`) are merged in the convergence output, summing `total_dollars_added` across classes and counting each buying fund once (`COUNT(DISTINCT fund_id)`), while excluding non-common equity instruments (`NOTE`, `DBCV`, `PFD`, `PREF`, `DEP SHS`, `WARRANT`, `UNIT`).
-- **New Listings / IPO Allocations Separation (`is_new_listing`)**: `Fact_Holdings.is_new_listing` is set to `1` when **no fund** in the database held the security in the prior quarter (`2026-Q1`). Seasoned convergence (`get_convergence_signals`) excludes `is_new_listing = 1`, while `get_new_listing_signals` reports new listings and IPO allocations (`SPCX`, `VGNT`, `ARXS`, `TGB`) in a separate table.
+- **"New to the sample (no prior-quarter holders)" Separation (`is_new_listing`)**: `Fact_Holdings.is_new_listing` is set to `1` when **no fund** in the 7-fund sample held the security in the prior quarter (`2026-Q1`). Seasoned convergence (`get_convergence_signals`) excludes `is_new_listing = 1`, while `get_new_to_sample_signals` exports these newly established positions (`SPCX`, `VGNT`, `ARXS`, `TGB`) to `output/new_positions_signals.csv`.
 
 ---
 
 ## Key Findings (Every Claim Backed by SQL Query Output)
 
-### 1. Broad Convergence Is Dominated by Quant Funds; Discretionary Convergence (`3` Funds) Is More Informative
-- **Full Universe (`min_funds = 4`, seasoned operating equities)**: **`56`** issuers met the split-adjusted buyer criteria across `4+` funds (`4` issuers with `5` buying funds and `52` with `4` buying funds). Because 4 of the 7 funds in our sample are quantitative or multi-strategy hedge funds (`Citadel Advisors`, `Two Sigma Investments`, `Renaissance Technologies`, and `Bridgewater Associates`), **`31` of the `56` signals (`55.4%`) are pure `Hedge Fund: 4` signals**, `22` have `3` hedge funds + `1` discretionary fund, and only `3` (`AMD`, `WMT`, plus none with 0 hedge funds) include `2` discretionary funds.
-- **Discretionary Subset (`Conglomerate`, `Public Pension Fund`, `Sovereign Wealth Fund`, `2+` of `3` buying)**: While **the discretionary sample is only `3` funds** (`Berkshire Hathaway`, `CalPERS`, and `Temasek Holdings`), isolating this cohort surfaces **`9`** issuer-level convergence signals—**`7` of which do not appear in the 56-stock full-universe list** (`GOOGL/GOOG`, `C`, `GLW`, `NTRA`, `ATAT`, `COHR`, `UEC`; only `AMD` and `WMT` overlap). Merging Alphabet Class A (`GOOGL`, `+$9,618,617,481` added) and Class C (`GOOG`, `+$9,046,385,016` added) into a single issuer row shows that `Berkshire Hathaway` and `Temasek Holdings` added a combined **`$18,665,002,497`** in `ALPHABET INC` common stock during `2026-Q2`.
-- **Source Query** (`sql/queries.sql` — Query 1 & `src/analysis.py::get_convergence_signals`):
+### 1. Broad Convergence Is Dominated by Hedge-Fund-Only Signals; Discretionary Convergence (`3` Funds) & Alphabet `$18.67B` Breakdown
+- **Full Universe (`min_funds = 4`, seasoned operating equities)**: **`56`** issuers met the split-adjusted buyer criteria across `4+` funds (`4` issuers with `5` buying funds and `52` with `4` buying funds). Because 4 of the 7 funds in our sample are hedge funds (`Citadel Advisors`, `Two Sigma Investments`, `Renaissance Technologies`, and `Bridgewater Associates`), **`31` of the `56` signals (`55.4%`) are hedge-fund-only (`Hedge Fund: 4`)**, `22` combine `3` hedge funds with `1` discretionary fund, and only `3` (`AMD`, `WMT`, and `0` with zero hedge funds) include `2` discretionary funds.
+- **Discretionary Subset (`Conglomerate`, `Public Pension Fund`, `Sovereign Wealth Fund`, `2+` of `3` buying)**: While **the discretionary sample is only `3` funds** (`Berkshire Hathaway`, `CalPERS`, and `Temasek Holdings`), isolating this cohort surfaces **`9`** issuer-level convergence signals—**`7` of which do not appear in the 56-stock full-universe list** (`GOOGL/GOOG`, `C`, `GLW`, `NTRA`, `ATAT`, `COHR`, `UEC`; only `AMD` and `WMT` overlap).
+- **Alphabet (`GOOGL/GOOG`) `$18,665,002,497` Breakdown by Fund and by Share Class**:
+  - **By Fund**:
+    - **`Berkshire Hathaway`**: **`$17,110,074,056`** added (`$8,770,349,040` in Class A `GOOGL` + `$8,339,725,016` in Class C `GOOG`).
+    - **`Temasek Holdings`**: **`$1,554,928,442`** added (`$848,268,442` in Class A `GOOGL` + `$706,660,000` in Class C `GOOG`).
+  - **By Share Class**:
+    - **Class A (`GOOGL`, CUSIP `02079K305`)**: **`$9,618,617,481`** added across `26,915,011` shares added at the Q2 price of `$357.37/share` (`Berkshire Hathaway` added `+24,541,369` shares / `+45.24%` = `$8,770,349,040`; `Temasek Holdings` added `+2,373,642` shares / `+50.47%` = `$848,268,442`).
+    - **Class C (`GOOG`, CUSIP `02079K107`)**: **`$9,046,385,016`** added across `25,603,218` shares added at the Q2 price of `$353.33/share` (`Berkshire Hathaway` added `+23,603,218` shares / `+658.35%` = `$8,339,725,016`; `Temasek Holdings` established a new `2,000,000`-share position = `$706,660,000`).
+
+| Fund | Share Class | CUSIP | Q1 Shares | Q2 Shares | Shares Added (QoQ %) | Q2 Holding Value (USD) | Dollars Added at Q2 Price (USD) |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+| **Berkshire Hathaway** | Class A (`GOOGL`) | `02079K305` | `54,249,798` | `78,791,167` | `+24,541,369` (`+45.24%`) | `$28,157,599,351` | **`$8,770,349,040`** |
+| **Temasek Holdings** | Class A (`GOOGL`) | `02079K305` | `4,702,736` | `7,076,378` | `+2,373,642` (`+50.47%`) | `$2,528,885,206` | **`$848,268,442`** |
+| *Subtotal — Class A (`GOOGL`)* | | `02079K305` | `58,952,534` | `85,867,545` | `+26,915,011` | `$30,686,484,557` | **`$9,618,617,481`** |
+| **Berkshire Hathaway** | Class C (`GOOG`) | `02079K107` | `3,585,215` | `27,188,433` | `+23,603,218` (`+658.35%`) | `$9,606,489,032` | **`$8,339,725,016`** |
+| **Temasek Holdings** | Class C (`GOOG`) | `02079K107` | `0` *(NEW)* | `2,000,000` | `+2,000,000` (`NEW`) | `$706,660,000` | **`$706,660,000`** |
+| *Subtotal — Class C (`GOOG`)* | | `02079K107` | `3,585,215` | `29,188,433` | `+25,603,218` | `$10,313,149,032` | **`$9,046,385,016`** |
+| **Combined Alphabet (`GOOGL/GOOG`)** | **Both Classes** | `02079K305/02079K107` | `62,537,749` | `115,055,978` | `+52,518,229` | `$40,999,633,589` | **`$18,665,002,497`** |
+
+- **Source Queries** (`sql/queries.sql` — Query 1 & Alphabet class/fund breakdown query):
   ```sql
-  -- Full Universe (56 rows): Query 1 in sql/queries.sql (HAVING COUNT(DISTINCT qb.fund_id) >= 4)
-  -- Discretionary Subset (9 rows): Query 1 filtered with AND f.fund_type IN ('Conglomerate', 'Public Pension Fund', 'Sovereign Wealth Fund') HAVING COUNT(DISTINCT qb.fund_id) >= 2
+  SELECT f.name AS fund_name, s.cusip, s.ticker, s.company_name,
+         COALESCE(prev.shares, 0) AS q1_shares, h.shares AS q2_shares,
+         (h.shares - COALESCE(prev.shares, 0)) AS shares_added,
+         h.value_usd AS q2_value_usd,
+         ROUND((h.shares - COALESCE(prev.shares, 0)) * (CAST(h.value_usd AS REAL) / h.shares), 2) AS dollars_added_usd
+  FROM Fact_Holdings h
+  JOIN Dim_Security s ON h.security_id = s.security_id
+  JOIN Dim_Fund f ON h.fund_id = f.fund_id
+  LEFT JOIN Fact_Holdings prev
+      ON prev.fund_id = h.fund_id AND prev.security_id = h.security_id
+     AND COALESCE(prev.put_call, '') = COALESCE(h.put_call, '') AND prev.period = '2026-Q1'
+  WHERE h.period = '2026-Q2' AND s.cusip IN ('02079K305', '02079K107')
+    AND (h.put_call IS NULL OR h.put_call = '')
+    AND f.name IN ('Berkshire Hathaway', 'Temasek Holdings')
+  ORDER BY s.cusip DESC, f.name;
   ```
 
-### 2. Confirmed vs. Unconfirmed Stock Splits (`yfinance` Verification)
-- Of the 10 candidate splits flagged by `SPLIT_OVERRIDES` and price-ratio auto-detection, **3 were confirmed** (`BKNG`, `KLAC`, `CVNA`, adjusting `25` Q1 holding rows) and **7 were marked `UNCONFIRMED`** after checking `yfinance` split history (where Q2 price changes reflected organic micro-cap drawdowns, leveraged ETF decay, or low-priced stock rallies rather than corporate split events):
+### 2. Confirmed vs. Unconfirmed Stock Splits (`yfinance` Verification + `split_cache.json`)
+- Of the 10 candidate splits flagged by `SPLIT_OVERRIDES` and price-ratio auto-detection, **3 were confirmed** (`BKNG`, `KLAC`, `CVNA`, adjusting `25` Q1 holding rows) and **7 were marked `UNCONFIRMED`** after checking `yfinance` split history (cached in `data/mappings/split_cache.json`):
 
 | CUSIP | Ticker | Company Name | Split Type | Factor | Q1 Median Price | Q2 Median Price | Source | Confirmation Status | Split Date (`yfinance`) | Applied? |
 | :--- | :--- | :--- | :--- | :---: | ---: | ---: | :--- | :--- | :--- | :---: |
@@ -75,7 +106,7 @@ Institutional investment managers exercising discretion over `$100M+` in Section
 
 ### 3. Why Renaissance Technologies' Implied `AMD` Price (`$559.02`) Differs From Other Funds (`$580.91`)
 - **Investigation & Root Cause**: In `2026-Q2`, five funds (`CalPERS`, `Temasek Holdings`, `Two Sigma Investments`, `Bridgewater Associates`, and `Citadel Advisors`) report an implied `AMD` (`CUSIP 007903107`) price of **`$580.9100/share`**, whereas `Renaissance Technologies` reports **`$559.0212/share`** (`-3.77%` difference). Inspecting the raw SEC EDGAR XML file `data/raw/0001037389_0001037389-26-000059.xml` confirms there is only **1 `<infoTable>` row** for `AMD` in Renaissance's filing, with literal XML tags `<value>463818193</value>` and `<sshPrnamt>829697</sshPrnamt>` (`463,818,193 / 829,697 = $559.0212`). The exact same phenomenon occurs in Renaissance's `2026-Q1` filing (`0001037389_0001037389-26-000033.xml`), where its single `AMD` entry reports `<value>42841643</value>` and `<sshPrnamt>216944</sshPrnamt>` (`$197.4779/share` vs. `$203.4300` at all other funds, `-2.93%`), and across 18 other multi-venue securities in Renaissance's 13F (`STM`, `RACE`, `ASML`, `BRK-B`, `KO`, `ORCL`, etc.).
-- **Why No Code Change Should Alter `value_usd`**: This is a **filer-level reporting artifact in Renaissance's raw SEC filing** (reflecting internal valuation conventions or cross-exchange share aggregation), **not** a parser or aggregation bug. Because the sum of `<value>` in Renaissance's XML equals its SEC Form 13F cover-page `<tableValueTotal>` to the exact dollar (`$72,617,871,974` in Q2; `$63,929,893,013` in Q1), modifying `value_usd` would break cover-page reconciliation (`test_cover_page_table_value_total_reconciliation`). Moreover, our split detector (`detect_splits`) uses the **cross-fund median price** (`$580.91`), making it completely immune to single-filer price outliers.
+- **Why No Code Change Should Alter `value_usd`**: This is a **filer-level reporting artifact in Renaissance's raw SEC filing**, **not** a parser or aggregation bug. Because the sum of `<value>` in Renaissance's XML equals its SEC Form 13F cover-page `<tableValueTotal>` to the exact dollar (`$72,617,871,974` in Q2; `$63,929,893,013` in Q1), modifying `value_usd` would break cover-page reconciliation. Moreover, our split detector (`detect_splits`) uses the **cross-fund median price** (`$580.91`), making it immune to single-filer price outliers.
 - **Source Query**:
   ```sql
   SELECT f.name, h.period, h.shares, h.value_usd, ROUND(CAST(h.value_usd AS REAL) / h.shares, 4) AS implied_price
@@ -136,16 +167,17 @@ Institutional investment managers exercising discretion over `$100M+` in Section
 
 ---
 
-## Separate New Listings / IPO Allocations Table — Q2 2026 (`is_new_listing = 1`, `min_funds = 2`)
+## Separate "New to the sample (no prior-quarter holders)" Table — Q2 2026 (`output/new_positions_signals.csv`, `is_new_listing = 1`)
 
-*Source Query*: `src/analysis.py::get_new_listing_signals('2026-Q2', min_funds=2)`
+*Source Query*: `src/analysis.py::get_new_to_sample_signals('2026-Q2', min_funds=3)`  
+*(Note: These are newly established positions across the 7-fund sample that had zero holders in `2026-Q1`, led by newly established positions in `SPCX` across 4 funds totaling `$2,861,656,740`.)*
 
 | Rank | CUSIP | Ticker | Company Name | Sector | `is_new_listing` | Funds Buying | Buying Funds | Total Dollars Added (USD) | Fund Type Breakdown |
 | :---: | :--- | :--- | :--- | :--- | :---: | :---: | :--- | ---: | :--- |
 | 1 | `84615Q103` | `SPCX` | SPACE EXPLORATION TECHNOLOGIES CORP | Technology | `1` | 4 | Bridgewater Associates, Citadel Advisors, Temasek Holdings, Two Sigma Investments | `$2,861,656,740` | Hedge Fund: 3, Sovereign Wealth Fund: 1 |
-| 2 | `92919V108` | `VGNT` | VOYAGER TECHNOLOGIES INC | Industrials | `1` | 4 | CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments | `$47,816,706` | Hedge Fund: 3, Public Pension Fund: 1 |
-| 3 | `03969K104` | `ARXS` | ARIS MINING CORP | Materials | `1` | 3 | Citadel Advisors, Renaissance Technologies, Two Sigma Investments | `$152,128,701` | Hedge Fund: 3 |
-| 4 | `876511106` | `TGB` | TASEKO MINES LTD | Materials | `1` | 3 | Citadel Advisors, Renaissance Technologies, Two Sigma Investments | `$90,094,508` | Hedge Fund: 3 |
+| 2 | `G9600F104` | `VGNT` | VERSIGENT PLC | Consumer Discretionary | `1` | 4 | CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments | `$47,816,706` | Hedge Fund: 3, Public Pension Fund: 1 |
+| 3 | `04339D105` | `ARXS` | ARXIS INC | Industrials | `1` | 3 | Citadel Advisors, Temasek Holdings, Two Sigma Investments | `$152,128,701` | Hedge Fund: 2, Sovereign Wealth Fund: 1 |
+| 4 | `89472Y107` | `TGB` | TREKOR METALS LTD | Materials | `1` | 3 | Renaissance Technologies, Temasek Holdings, Two Sigma Investments | `$90,094,508` | Hedge Fund: 2, Sovereign Wealth Fund: 1 |
 
 ---
 
@@ -167,10 +199,11 @@ Institutional investment managers exercising discretion over `$100M+` in Section
 
 1. **Long-Only Disclosure**: Form 13F only captures long US-listed Section 13(f) equities and exchange-traded options (`Put`/`Call`). It omits short equity sales, total-return swaps, OTC derivatives, and non-US local listings—meaning a reported long equity stake may hedge an unreported short position.
 2. **45-Day Reporting Delay**: Form 13F filings are submitted up to 45 calendar days after quarter-end; high-turnover managers may have already rotated out of positions disclosed at quarter-end.
-3. **Quantitative Dominance vs. Small Discretionary Sample (`3` Funds)**: Broad convergence across the 7-fund universe is heavily influenced by the 4 hedge funds (`31` of `56` signals are pure `Hedge Fund: 4`), whose share increases frequently reflect market-making inventory, options delta-hedging (`$700.88B` of option notional at Citadel in `2026-Q2`), or statistical arbitrage factor turnover. While the discretionary convergence filter (`output/discretionary_signals.csv`) isolates fundamental long-horizon accumulation, **the discretionary sample in this study consists of only 3 funds** (`Berkshire Hathaway`, `CalPERS`, and `Temasek Holdings`), so a 2-fund convergence threshold represents agreement between two institutions.
+3. **Hedge-Fund-Only Dominance vs. Small Discretionary Sample (`3` Funds)**: Broad convergence across the 7-fund universe is heavily influenced by hedge-fund-only signals (`31` of `56` signals are `Hedge Fund: 4`), where share increases frequently reflect market-making inventory, options delta-hedging (`$700.88B` of option notional at Citadel in `2026-Q2`), or factor turnover. While the discretionary convergence filter (`output/discretionary_signals.csv`) isolates fundamental long-horizon accumulation, **the discretionary sample in this study consists of only 3 funds** (`Berkshire Hathaway`, `CalPERS`, and `Temasek Holdings`), so a 2-fund convergence threshold represents agreement between two institutions.
+4. **No Forward-Return Test & Q2 Price Valuation**: No forward-return test is performed, so this analysis describes institutional behavior, not predictive alpha; dollars added use Q2 prices.
 
 ---
 
 ## Conclusion
 
-Merging multiple share classes at the 6-character CUSIP issuer level (`GOOGL/GOOG` -> `ALPHABET INC`), separating new listings (`is_new_listing = 1`, led by `SPCX` at `+$2.86B`) and ETFs (`IVV`, `SPY`), and restricting split adjustments to `yfinance`-confirmed corporate splits (`BKNG` 25-for-1, `KLAC` 10-for-1, `CVNA` 5-for-1) produces a clean institutional accumulation signal. Most importantly, comparing the 56-stock full-universe signal list (`55.4%` pure hedge-fund signals) against the 3-fund discretionary subset (`9` signals led by `GOOGL/GOOG` at `+$18.67B` and `C` at `+$226.49M`) demonstrates that separating discretionary fundamental managers from high-turnover quantitative funds is essential when interpreting 13F consensus buying.
+Merging multiple share classes at the 6-character CUSIP issuer level (`GOOGL/GOOG` -> `ALPHABET INC`), separating **"New to the sample (no prior-quarter holders)"** positions (`output/new_positions_signals.csv`, led by newly established positions in `SPCX` at `+$2.86B`) and ETFs (`IVV`, `SPY`), and restricting split adjustments to `yfinance`-confirmed corporate splits (`BKNG` 25-for-1, `KLAC` 10-for-1, `CVNA` 5-for-1, cached in `data/mappings/split_cache.json`) produces a clean institutional accumulation signal. Comparing the 56-stock full-universe signal list (`55.4%` hedge-fund-only signals) against the 3-fund discretionary subset (`9` signals led by `GOOGL/GOOG` at `+$18.67B`—`$17.11B` from `Berkshire Hathaway` and `$1.55B` from `Temasek Holdings` across Class A `$9.62B` and Class C `$9.05B`—and `C` at `+$226.49M`) underscores the value of separating discretionary fundamental managers from hedge-fund-only turnover when interpreting 13F consensus buying.

@@ -12,7 +12,7 @@ from src.analysis import (
     get_etf_convergence_signals,
     get_fund_concentration,
     get_fund_summary,
-    get_new_listing_signals,
+    get_new_to_sample_signals,
     get_sector_by_period,
     get_top_holdings_by_aum,
 )
@@ -34,7 +34,7 @@ def run_pipeline() -> pd.DataFrame:
     Executes the full 13F data pipeline:
     1. Parse and aggregate raw 13F XML files from data/raw/
     2. Map unique CUSIPs to tickers/names via OpenFIGI + cache, and map tickers to SIC sectors
-    3. Detect stock splits (confirming via yfinance), load funds, securities, and split-adjusted holdings into SQLite
+    3. Detect stock splits (confirming via yfinance + split_cache.json), load funds, securities, and split-adjusted holdings into SQLite
     4. Export Power BI CSVs to output/
     
     Returns:
@@ -82,6 +82,7 @@ def run_pipeline() -> pd.DataFrame:
         get_convergence_signals("2026-Q2", fund_types=DISCRETIONARY_FUND_TYPES),
         "discretionary_signals.csv",
     )
+    export_to_csv(get_new_to_sample_signals("2026-Q2", min_funds=3), "new_positions_signals.csv")
     export_to_csv(get_top_holdings_by_aum("2026-Q2", top_n=50), "top_holdings.csv")
     export_to_csv(get_fund_summary(), "fund_summary.csv")
     export_to_csv(get_sector_by_period(), "sector_by_period.csv")
@@ -129,7 +130,7 @@ if __name__ == "__main__":
     print("\n=== Top 10 Holdings for Berkshire Hathaway (2026-Q2) ===")
     print(get_fund_concentration("Berkshire Hathaway", "2026-Q2").to_string(index=False))
 
-    print("\n=== Full Universe Convergence Signals (2026-Q2, Top 15, Issuer-Merged, Excl. New Listings & ETFs) ===")
+    print("\n=== Full Universe Convergence Signals (2026-Q2, Top 15, Issuer-Merged, Excl. New to Sample & ETFs) ===")
     full_signals = get_convergence_signals("2026-Q2", min_funds=4)
     print(f"Total full-universe convergence signals (4+ funds): {len(full_signals)}")
     print(full_signals.head(15).to_string(index=False))
@@ -139,10 +140,10 @@ if __name__ == "__main__":
     print(f"Total discretionary convergence signals (2+ of 3 discretionary funds): {len(disc_signals)}")
     print(disc_signals.head(15).to_string(index=False))
 
-    print("\n=== New Listings / IPO Allocations (2026-Q2, Separate Table, is_new_listing = 1) ===")
-    new_listings = get_new_listing_signals("2026-Q2", min_funds=3)
-    print(f"Total New Listing / IPO Allocation signals (3+ funds): {len(new_listings)}")
-    print(new_listings.to_string(index=False))
+    print("\n=== New to the sample (no prior-quarter holders) (2026-Q2, Separate Table, is_new_listing = 1) ===")
+    new_to_sample = get_new_to_sample_signals("2026-Q2", min_funds=3)
+    print(f"Total New to the sample (no prior-quarter holders) signals (3+ funds): {len(new_to_sample)}")
+    print(new_to_sample.to_string(index=False))
 
     print("\n=== ETF & Index Trust Convergence Signals (2026-Q2, Separate Table) ===")
     etf_signals = get_etf_convergence_signals("2026-Q2", min_funds=3)

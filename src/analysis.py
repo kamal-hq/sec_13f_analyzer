@@ -248,14 +248,15 @@ def get_convergence_signals(
         return pd.read_sql_query(query, conn, params=tuple(params))
 
 
-def get_new_listing_signals(
+def get_new_to_sample_signals(
     period: str = "2026-Q2",
     min_funds: int = 3,
     min_added_value: int = 1_000_000,
 ) -> pd.DataFrame:
     """
-    Returns New Listings / IPO Allocations (where is_new_listing = 1, meaning NO fund in the sample
-    held the security or issuer in the prior period) accumulated by min_funds or more institutions in the given period.
+    Returns "New to the sample (no prior-quarter holders)" signals (where is_new_listing = 1,
+    meaning NO fund in the sample held the security or issuer in the prior period) accumulated
+    by min_funds or more institutions in the given period.
     """
     with get_connection() as conn:
         query = f"""
@@ -340,6 +341,8 @@ def get_new_listing_signals(
         return pd.read_sql_query(query, conn, params=(period, period, min_added_value, min_funds))
 
 
+# Alias for backward compatibility
+get_new_listing_signals = get_new_to_sample_signals
 
 
 def get_etf_convergence_signals(

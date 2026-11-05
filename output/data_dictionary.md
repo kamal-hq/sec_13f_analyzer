@@ -1,6 +1,6 @@
 # Power BI Output Data Dictionary (`output/`)
 
-This document defines the schema, data types, and business definitions for the five CSV datasets exported to `output/` for Power BI reporting.
+This document defines the schema, data types, and business definitions for the six CSV datasets exported to `output/` for Power BI reporting.
 
 ---
 
@@ -8,7 +8,7 @@ This document defines the schema, data types, and business definitions for the f
 
 Contains **2026-Q2 Smart Money Convergence Signals** across the full 7-fund institutional universe (`min_funds = 4`), merged at the 6-character CUSIP issuer level (e.g., `GOOGL` + `GOOG` merged into one `ALPHABET INC` row).
 A fund counts as a qualified **buyer** of an operating common-equity security only if:
-1. The holding is operating common equity (`put_call IS NULL OR put_call = ''`, excluding options, notes/preferreds/warrants, ETFs/index trusts, and new listings where `is_new_listing = 1`),
+1. The holding is operating common equity (`put_call IS NULL OR put_call = ''`, excluding options, notes/preferreds/warrants, ETFs/index trusts, and "New to the sample (no prior-quarter holders)" positions where `is_new_listing = 1`),
 2. The position was newly initiated (`qoq_change_flag = 'NEW'`) **or** its split-adjusted share count increased by at least **10% QoQ** (`(q2_shares - q1_split_adj_shares) / q1_split_adj_shares >= 0.10`), **and**
 3. The dollar value of the added shares at Q2 prices (`shares_added * (q2_value_usd / q2_shares)`) is at least **$1,000,000**.
 4. Multiple share classes of the same issuer (`SUBSTR(cusip, 1, 6)`) are merged into a single row: `total_dollars_added` is summed across share classes and each buying fund is counted once.
@@ -19,7 +19,7 @@ A fund counts as a qualified **buyer** of an operating common-equity security on
 | `ticker` | `STRING` | Exchange ticker symbol (or `/`-delimited tickers when multiple share classes are merged, e.g., `GOOGL/GOOG`). |
 | `company_name` | `STRING` | Canonical issuer name mapped from OpenFIGI with fallback to the 13F XML `<nameOfIssuer>`. |
 | `sector` | `STRING` | Broad sector group mapped from the issuer's SEC EDGAR Standard Industrial Classification (SIC) code (`data/mappings/sector_cache.json`), with `'Unknown'` fallback. |
-| `is_new_listing` | `INTEGER` | `1` if no fund in the sample held the security in the prior period (`2026-Q1`); `0` otherwise. Main convergence tables exclude `is_new_listing = 1` (which are reported in the separate New Listings / IPO Allocations table). |
+| `is_new_listing` | `INTEGER` | `1` if no fund in the sample held the security in the prior period (`2026-Q1`); `0` otherwise. Main convergence tables exclude `is_new_listing = 1` (which are reported in the separate "New to the sample (no prior-quarter holders)" table `output/new_positions_signals.csv`). |
 | `funds_buying` | `INTEGER` | Count of distinct institutional funds (`>= 4`) meeting the convergence buyer criteria in `2026-Q2` (each fund counted once per issuer). |
 | `funds` | `STRING` | Alphabetically sorted, comma-separated list of the distinct buying funds' names. |
 | `total_dollars_added` | `INTEGER` | Sum of dollar value added (`shares_added * Q2_price`) across all qualified buying funds and share classes in USD. |
@@ -37,16 +37,33 @@ Contains **2026-Q2 Discretionary Smart Money Convergence Signals** restricted to
 | `ticker` | `STRING` | Exchange ticker symbol (or `/`-delimited tickers when multiple share classes are merged, e.g., `GOOGL/GOOG`). |
 | `company_name` | `STRING` | Canonical issuer name. |
 | `sector` | `STRING` | Broad sector group mapped from the issuer's SEC EDGAR SIC code (`'Unknown'` fallback). |
-| `is_new_listing` | `INTEGER` | `0` for seasoned listings held in the prior period (`1` for new listings/IPOs, excluded from main table). |
+| `is_new_listing` | `INTEGER` | `0` for securities held in the prior period (`1` for "New to the sample (no prior-quarter holders)" positions, excluded from main table). |
 | `funds_buying` | `INTEGER` | Count of distinct discretionary funds (`>= 2` of 3) meeting the buyer criteria in `2026-Q2` (each fund counted once per issuer). |
 | `funds` | `STRING` | Comma-separated list of the distinct discretionary buying funds. |
 | `total_dollars_added` | `INTEGER` | Sum of dollar value added (`shares_added * Q2_price`) across the qualified discretionary buyers and share classes in USD. |
 | `fund_type_breakdown` | `STRING` | Breakdown of distinct discretionary buying funds by `Dim_Fund.fund_type` (e.g., `Conglomerate: 1, Sovereign Wealth Fund: 1`). |
 
+---
+
+## 3. `output/new_positions_signals.csv`
+
+Contains **2026-Q2 "New to the sample (no prior-quarter holders)"** signals (`is_new_listing = 1`), representing operating common-equity securities that **no fund in the 7-fund sample held in `2026-Q1`** and that were newly established by `3` or more funds in `2026-Q2` (with at least `$1,000,000` added per buying fund).
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `cusip` | `STRING` | 9-character CUSIP (or `/`-delimited CUSIPs if multiple classes of the same issuer are merged). |
+| `ticker` | `STRING` | Exchange ticker symbol. |
+| `company_name` | `STRING` | Canonical issuer name. |
+| `sector` | `STRING` | Broad sector group mapped from the issuer's SEC EDGAR SIC code (`'Unknown'` fallback). |
+| `is_new_listing` | `INTEGER` | Always `1` (indicating zero prior-quarter holders across the 7-fund sample). |
+| `funds_buying` | `INTEGER` | Count of distinct funds (`>= 3`) establishing a position of `$1,000,000+` in `2026-Q2`. |
+| `funds` | `STRING` | Alphabetically sorted, comma-separated list of the buying funds' names. |
+| `total_dollars_added` | `INTEGER` | Sum of Q2 position value added in USD across all qualified buying funds. |
+| `fund_type_breakdown` | `STRING` | Breakdown of buying funds by `Dim_Fund.fund_type`. |
 
 ---
 
-## 3. `output/top_holdings.csv`
+## 4. `output/top_holdings.csv`
 
 Contains the **Top 50 Institutional Equity Holdings in 2026-Q2** ranked by combined common-equity dollar value (`total_aum`) across all 7 funds. Excludes option positions (`Put`/`Call`) and exited placeholder rows (`qoq_change_flag = 'EXITED'`).
 
@@ -62,7 +79,7 @@ Contains the **Top 50 Institutional Equity Holdings in 2026-Q2** ranked by combi
 
 ---
 
-## 4. `output/fund_summary.csv`
+## 5. `output/fund_summary.csv`
 
 Contains one row per `(fund, period)` across all 7 funds and both quarters (`2026-Q1` and `2026-Q2`, 14 rows total), summarizing portfolio size with and without options, position counts, top-10 concentration, and quarter-over-quarter activity counts.
 
@@ -86,7 +103,7 @@ Contains one row per `(fund, period)` across all 7 funds and both quarters (`202
 
 ---
 
-## 5. `output/sector_by_period.csv`
+## 6. `output/sector_by_period.csv`
 
 Contains institutional AUM aggregated by `(period, sector)` across `2026-Q1` and `2026-Q2`, reporting both common-equity AUM (excluding options) and total AUM (including options).
 

@@ -1,5 +1,5 @@
 -- 1. Smart Money Convergence Signal (2026-Q2):
--- Identifies operating-equity issuers accumulated by 4 or more independent institutions in the same quarter (excluding options, ETFs, and new listings).
+-- Identifies operating-equity issuers accumulated by 4 or more independent institutions in the same quarter (excluding options, ETFs, and "New to the sample (no prior-quarter holders)" rows).
 -- Merges multiple share classes at the 6-character CUSIP issuer level (e.g., GOOGL+GOOG -> one Alphabet row), summing dollars added and counting each fund once.
 -- A fund qualifies as a buyer only if the position is newly initiated or its split-adjusted share count grew by >=10% QoQ and added value >= $1,000,000.
 WITH prior_period AS (

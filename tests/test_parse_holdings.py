@@ -342,21 +342,25 @@ def test_top_signal_sector_mappings_fixed() -> None:
 def test_is_new_listing_excluded_from_convergence_and_shown_separately() -> None:
     """
     Verifies that securities with 0 prior-period holders (e.g., SPCX) have is_new_listing = 1,
-    are excluded from the main convergence signals table, and appear in get_new_listing_signals.
+    are excluded from the main convergence signals table, and appear in get_new_to_sample_signals
+    and output/new_positions_signals.csv.
     """
-    from src.analysis import get_convergence_signals, get_new_listing_signals
+    from src.analysis import get_convergence_signals, get_new_to_sample_signals
 
     full_signals = get_convergence_signals("2026-Q2", min_funds=4)
     assert "SPCX" not in full_signals["ticker"].dropna().values
     assert "84615Q103" not in full_signals["cusip"].values
 
-    new_listings = get_new_listing_signals("2026-Q2", min_funds=2)
-    assert not new_listings.empty
-    assert "SPCX" in new_listings["ticker"].values
-    spcx_row = new_listings[new_listings["ticker"] == "SPCX"].iloc[0]
+    new_to_sample = get_new_to_sample_signals("2026-Q2", min_funds=2)
+    assert not new_to_sample.empty
+    assert "SPCX" in new_to_sample["ticker"].values
+    spcx_row = new_to_sample[new_to_sample["ticker"] == "SPCX"].iloc[0]
     assert int(spcx_row["funds_buying"]) == 4
     assert int(spcx_row["total_dollars_added"]) == 2_861_656_740
     assert int(spcx_row["is_new_listing"]) == 1
+
+    csv_path = os.path.join("output", "new_positions_signals.csv")
+    assert os.path.exists(csv_path)
 
 
 def test_unconfirmed_splits_are_not_applied() -> None:
@@ -390,5 +394,33 @@ def test_unconfirmed_splits_are_not_applied() -> None:
             """
         ).fetchone()
         assert tdup is not None and int(tdup["shares"]) == 2_223_507
+
+
+def test_split_cache_created_and_fallback_used_on_network_failure(monkeypatch, caplog) -> None:
+    """
+    Verifies that data/mappings/split_cache.json caches yfinance split confirmations and
+    is used (with a log message) when the yfinance network call fails.
+    """
+    import json
+    import logging
+    import yfinance as yf
+    from src.database import SPLIT_CACHE_PATH, _confirm_split_with_yfinance
+
+    assert os.path.exists(SPLIT_CACHE_PATH)
+    with open(SPLIT_CACHE_PATH, "r", encoding="utf-8") as f:
+        cache_data = json.load(f)
+    assert "CVNA" in cache_data
+    assert cache_data["CVNA"]["confirmation_status"] == "CONFIRMED"
+
+    def _raise_network_error(_ticker: str):
+        raise ConnectionError("Simulated network outage")
+
+    monkeypatch.setattr(yf, "Ticker", _raise_network_error)
+    with caplog.at_level(logging.INFO):
+        status, split_date = _confirm_split_with_yfinance("CVNA", 5.0)
+    assert status == "CONFIRMED"
+    assert split_date == "2026-05-08"
+    assert "using cached split confirmation" in caplog.text.lower()
+
 
 

@@ -2,6 +2,7 @@
 Handles all SQLite database operations including schema creation and data insertion.
 """
 
+import json
 import logging
 import os
 import sqlite3
@@ -11,6 +12,7 @@ from config import COMMON_SPLIT_FACTORS, DB_PATH, FUND_TYPES, SPLIT_OVERRIDES, T
 logger = logging.getLogger(__name__)
 
 CIK_TO_FUND_NAME: dict[str, str] = {cik: name for name, cik in TARGET_FUNDS.items()}
+SPLIT_CACHE_PATH = os.path.join("data", "mappings", "split_cache.json")
 
 
 def get_connection() -> sqlite3.Connection:
@@ -269,29 +271,85 @@ def insert_holding(
             conn.close()
 
 
+def _load_split_cache() -> dict[str, dict]:
+    """Loads cached yfinance split confirmations from data/mappings/split_cache.json."""
+    if os.path.exists(SPLIT_CACHE_PATH):
+        try:
+            with open(SPLIT_CACHE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.warning("Failed to read split cache %s: %s", SPLIT_CACHE_PATH, exc)
+    return {}
+
+
+def _save_split_cache(cache: dict[str, dict]) -> None:
+    """Persists yfinance split confirmations to data/mappings/split_cache.json."""
+    os.makedirs(os.path.dirname(SPLIT_CACHE_PATH), exist_ok=True)
+    with open(SPLIT_CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=2, sort_keys=True)
+
+
 def _confirm_split_with_yfinance(ticker: str | None, expected_factor: float) -> tuple[str, str | None]:
     """
     Checks yfinance split history for `ticker` between 2026-Q1 and 2026-Q2 period-ends
     (2026-03-25 through 2026-07-05) to confirm an auto-detected stock split.
+    Caches confirmations in data/mappings/split_cache.json and falls back to the cache
+    (logging when the cache is used) if the network call fails.
     Returns (confirmation_status, split_date) where confirmation_status is 'CONFIRMED' or 'UNCONFIRMED'.
     """
     if not ticker or pd.isna(ticker) or str(ticker).strip() in ("", "None"):
         return "UNCONFIRMED", None
+
+    clean_ticker = str(ticker).strip().upper()
+    cache = _load_split_cache()
+
     try:
         import yfinance as yf
 
-        splits = yf.Ticker(str(ticker).strip()).splits
-        if splits is None or len(splits) == 0:
-            return "UNCONFIRMED", None
-        for dt, ratio in splits.items():
-            dt_str = str(dt)[:10]
-            if "2026-03-25" <= dt_str <= "2026-07-05":
-                r = float(ratio)
-                if r > 0 and abs(r - expected_factor) / expected_factor <= 0.10:
-                    return "CONFIRMED", dt_str
-        return "UNCONFIRMED", None
+        splits = yf.Ticker(clean_ticker).splits
+        # If yfinance swallowed a network error and returned empty for a previously confirmed split, use cache
+        if (splits is None or len(splits) == 0) and clean_ticker in cache and cache[clean_ticker].get("confirmation_status") == "CONFIRMED":
+            entry = cache[clean_ticker]
+            logger.info(
+                "Using cached split confirmation for %s from %s (%s on %s)",
+                clean_ticker,
+                SPLIT_CACHE_PATH,
+                entry.get("confirmation_status"),
+                entry.get("split_date"),
+            )
+            return str(entry["confirmation_status"]), entry.get("split_date")
+
+        status = "UNCONFIRMED"
+        split_date: str | None = None
+        if splits is not None and len(splits) > 0:
+            for dt, ratio in splits.items():
+                dt_str = str(dt)[:10]
+                if "2026-03-25" <= dt_str <= "2026-07-05":
+                    r = float(ratio)
+                    if r > 0 and abs(r - expected_factor) / expected_factor <= 0.10:
+                        status = "CONFIRMED"
+                        split_date = dt_str
+                        break
+
+        cache[clean_ticker] = {
+            "confirmation_status": status,
+            "expected_factor": float(expected_factor),
+            "split_date": split_date,
+        }
+        _save_split_cache(cache)
+        return status, split_date
     except Exception as exc:
-        logger.warning("yfinance split check failed for %s: %s", ticker, exc)
+        if clean_ticker in cache:
+            entry = cache[clean_ticker]
+            logger.info(
+                "yfinance network call failed for %s (%s); using cached split confirmation from %s (%s)",
+                clean_ticker,
+                exc,
+                SPLIT_CACHE_PATH,
+                entry.get("confirmation_status"),
+            )
+            return str(entry.get("confirmation_status", "UNCONFIRMED")), entry.get("split_date")
+        logger.warning("yfinance split check failed for %s and no cache entry found: %s", clean_ticker, exc)
         return "UNCONFIRMED", None
 
 
