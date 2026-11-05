@@ -1,7 +1,7 @@
 -- 1. Smart Money Convergence Signal (2026-Q2):
--- Identifies common-equity securities accumulated by 4 or more independent institutions in the same quarter.
--- A fund qualifies as a buyer only if the position is newly initiated or its share count grew by >=10% QoQ
--- and the dollar value of shares added (shares_added * Q2 price) is at least $1,000,000, filtering out price drift and noise.
+-- Identifies operating-equity securities accumulated by 4 or more independent institutions in the same quarter (excluding ETFs and index trusts).
+-- A fund qualifies as a buyer only if the position is newly initiated or its split-adjusted share count grew by >=10% QoQ
+-- and the dollar value of shares added (shares_added * Q2 price) is at least $1,000,000, filtering out stock splits, price drift, and noise.
 WITH prior_period AS (
     SELECT MAX(period) AS prev_period
     FROM Fact_Holdings
@@ -36,6 +36,46 @@ qualified_buyers AS (
           OR (prev.shares > 0 AND (h.shares - prev.shares) * 1.0 / prev.shares >= 0.10)
       )
       AND ((h.shares - COALESCE(prev.shares, 0)) * (CAST(h.value_usd AS REAL) / h.shares)) >= 1000000
+      AND NOT (
+          UPPER(COALESCE(s.company_name, '')) LIKE '% ETF%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE 'ETF %'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%ISHARES%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%SPDR%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%VANGUARD%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%INVESCO%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%PROSHARES%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%WISDOMTREE%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%DIREXION%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%VANECK%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%FIRST TRUST%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%SCHWAB STRATEGIC%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%SELECT SECTOR%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%INDEX FUND%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%INDEX TRUST%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%EXCHANGE TRADED%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%ARK ETF%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%GLOBAL X%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%PACER FUNDS%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%DIMENSIONAL ETF%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%FIDELITY COVINGTON%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%JPMORGAN_EXCHANGE%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%KRANESHARES%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%ABRDN %TRUST%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%SPROTT %TRUST%'
+          OR UPPER(COALESCE(s.company_name, '')) LIKE '%GRAYSCALE%'
+          OR UPPER(COALESCE(s.security_class, '')) LIKE '%ETF%'
+          OR UPPER(COALESCE(s.security_class, '')) LIKE '%UNIT SER%'
+          OR UPPER(COALESCE(s.security_class, '')) LIKE '%SHS BEN INT%'
+          OR UPPER(COALESCE(s.security_class, '')) LIKE '%TR UNIT%'
+          OR UPPER(COALESCE(s.ticker, '')) IN (
+              'SPY','IVV','VOO','QQQ','IWM','DIA','EFA','EEM','VTI','VEA','VWO','AGG','BND','LQD','HYG','TLT','IEF','SHY','GLD','SLV','USO','UNG',
+              'XLF','XLK','XLE','XLV','XLI','XLP','XLY','XLU','XLB','XLRE','XLC','SMH','SOXX','IBB','XBI','KRE','KBE','XOP','OIH','GDX','GDXJ',
+              'VNQ','IYR','ITB','XHB','XRT','JETS','ARKK','ARKG','ARKW','ARKF','ARKQ','SCHD','VIG','VYM','DVY','SDY','RSP','SPLV','USMV','MTUM',
+              'QUAL','VLUE','SIZE','IWF','IWD','IWO','IWN','IWP','IWS','IJH','IJR','MDY','VO','VB','VV','VXUS','IXUS','ACWI','VT','IEFA','IEMG',
+              'EWJ','EWZ','EWY','EWT','EWG','EWU','EWC','EWA','EWH','EWS','EWW','INDA','MCHI','FXI','KWEB','ASHR','EMB','JNK','BKLN','SRLN','VCIT',
+              'VCSH','VGIT','VGSH','VGLT','GOVT','TIP','STIP','VTIP','MBB','VMBS','PFF','PGX','ICSH','JPST','MINT','SGOV','BIL','SHV','TFLO','USFR'
+          )
+      )
 ),
 type_breakdown AS (
     SELECT

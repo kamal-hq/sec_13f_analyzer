@@ -23,21 +23,53 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+ETF_SQL_CONDITION = """(
+    UPPER(COALESCE(s.company_name, '')) LIKE '%ISHARES%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%SPDR%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%VANGUARD%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%INVESCO%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%PROSHARES%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%DIREXION%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%VANECK%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%WISDOMTREE%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%SCHWAB STRATEGIC%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%FIRST TR%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%GLOBAL X%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%ARK ETF%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '% ETF%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE 'ETF %'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%INDEX FD%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%EXCHANGE TRADED%'
+    OR UPPER(COALESCE(s.company_name, '')) LIKE '%EXCH TRADED%'
+    OR UPPER(COALESCE(s.security_class, '')) LIKE '%ETF%'
+    OR UPPER(COALESCE(s.ticker, '')) IN (
+        'IVV', 'SPY', 'VOO', 'QQQ', 'IWM', 'DIA', 'EEM', 'TLT', 'GLD', 'SLV',
+        'HYG', 'LQD', 'XLF', 'XLK', 'XLE', 'XLV', 'XLI', 'XLP', 'XLU', 'XLY',
+        'XLB', 'XLC', 'XLRE', 'SMH', 'SOXX', 'EWZ', 'FXI', 'KWEB', 'ARKK',
+        'IBIT', 'FBTC', 'GBTC', 'ETHA', 'BITO', 'VTI', 'VEA', 'VWO', 'IEFA',
+        'EFA', 'AGG', 'BND', 'JNK', 'EMB', 'TIP', 'SHY', 'IEF', 'GOVT', 'MUB',
+        'RSP', 'MDY', 'IJR', 'IJH', 'IWF', 'IWD', 'IWO', 'IWN', 'ACWI', 'VXUS',
+        'URA', 'USO', 'UNG', 'KBE', 'KRE', 'XBI', 'XME', 'RWL'
+    )
+)"""
+
+
 def get_convergence_signals(
     period: str,
     min_funds: int = 4,
     min_pct_increase: float = 0.10,
     min_added_value: int = 1_000_000,
     fund_types: list[str] | None = None,
+    include_etfs: bool = False,
 ) -> pd.DataFrame:
     """
-    Identifies Smart Money Convergence signals for a reporting period.
+    Identifies Smart Money Convergence signals for a reporting period on split-adjusted shares.
     A fund counts as a "buyer" of a security only if:
-      1. Its position is NEW, OR its shares increased by at least min_pct_increase (10%) QoQ
-         (using shares rather than value, since value fluctuates with price), AND
+      1. Its position is NEW, OR its split-adjusted shares increased by at least min_pct_increase (10%) QoQ, AND
       2. The dollar value added is at least min_added_value ($1,000,000), computed as
          shares_added * current_period_price (where price = value_usd / shares).
-      3. Option positions (put_call = 'Put' or 'Call') are excluded; only common equity counts.
+      3. Option positions (put_call = 'Put' or 'Call') and ETFs/index trusts are excluded;
+         only common operating equity counts.
 
     Args:
         period (str): The reporting period (e.g., '2026-Q2').
@@ -45,9 +77,7 @@ def get_convergence_signals(
         min_pct_increase (float): Minimum QoQ share increase fraction for existing positions. Defaults to 0.10.
         min_added_value (int): Minimum dollar value added in USD. Defaults to 1_000_000.
         fund_types (list[str] | None): Optional list of fund_type values to filter Dim_Fund.
-            When provided and matching funds in Dim_Fund are fewer than min_funds (e.g., 3 discretionary funds),
-            effective min_funds is capped at max(2, matching_fund_count - 1) so multi-fund convergence within
-            the subset is still returned.
+        include_etfs (bool): If False (default), excludes ETFs and index trusts.
 
     Returns:
         pd.DataFrame: Convergence signals with columns:
@@ -63,7 +93,6 @@ def get_convergence_signals(
             fund_type_clause = f"AND f.fund_type IN ({placeholders})"
             params.extend(fund_types)
 
-            # Cap effective_min_funds if the filtered fund_types universe has fewer than min_funds total funds
             count_row = conn.execute(
                 f"SELECT COUNT(*) AS cnt FROM Dim_Fund f WHERE f.fund_type IN ({placeholders})",
                 tuple(fund_types),
@@ -73,6 +102,7 @@ def get_convergence_signals(
                 effective_min_funds = max(2, matching_funds - 1)
 
         params.append(effective_min_funds)
+        etf_clause = "" if include_etfs else f"AND NOT {ETF_SQL_CONDITION}"
 
         query = f"""
             WITH prior_period AS (
@@ -109,6 +139,7 @@ def get_convergence_signals(
                       OR (prev.shares > 0 AND (h.shares - prev.shares) * 1.0 / prev.shares >= ?)
                   )
                   AND ((h.shares - COALESCE(prev.shares, 0)) * (CAST(h.value_usd AS REAL) / h.shares)) >= ?
+                  {etf_clause}
                   {fund_type_clause}
             ),
             type_breakdown AS (
@@ -141,6 +172,90 @@ def get_convergence_signals(
             ORDER BY funds_buying DESC, total_dollars_added DESC
         """
         return pd.read_sql_query(query, conn, params=tuple(params))
+
+
+def get_etf_convergence_signals(
+    period: str,
+    min_funds: int = 3,
+    min_pct_increase: float = 0.10,
+    min_added_value: int = 1_000_000,
+) -> pd.DataFrame:
+    """
+    Returns ETFs and index trusts accumulated by min_funds or more institutions in the given period
+    using the same buyer criteria (>=10% share increase or NEW, >=$1M added, excluding options).
+    """
+    with get_connection() as conn:
+        query = f"""
+            WITH prior_period AS (
+                SELECT MAX(period) AS prev_period
+                FROM Fact_Holdings
+                WHERE period < ?
+            ),
+            qualified_buyers AS (
+                SELECT
+                    h.security_id,
+                    s.cusip,
+                    s.ticker,
+                    s.company_name,
+                    s.security_class,
+                    f.fund_id,
+                    f.name AS fund_name,
+                    f.fund_type,
+                    (h.shares - COALESCE(prev.shares, 0)) * (CAST(h.value_usd AS REAL) / h.shares) AS added_value_usd
+                FROM Fact_Holdings h
+                JOIN Dim_Security s ON h.security_id = s.security_id
+                JOIN Dim_Fund f ON h.fund_id = f.fund_id
+                LEFT JOIN Fact_Holdings prev
+                    ON prev.fund_id = h.fund_id
+                   AND prev.security_id = h.security_id
+                   AND COALESCE(prev.put_call, '') = COALESCE(h.put_call, '')
+                   AND prev.period = (SELECT prev_period FROM prior_period)
+                   AND prev.value_usd > 0
+                WHERE h.period = ?
+                  AND (h.put_call IS NULL OR h.put_call = '')
+                  AND h.value_usd > 0
+                  AND h.shares > 0
+                  AND (
+                      h.qoq_change_flag = 'NEW'
+                      OR (prev.shares > 0 AND (h.shares - prev.shares) * 1.0 / prev.shares >= ?)
+                  )
+                  AND ((h.shares - COALESCE(prev.shares, 0)) * (CAST(h.value_usd AS REAL) / h.shares)) >= ?
+                  AND {ETF_SQL_CONDITION}
+            ),
+            type_breakdown AS (
+                SELECT
+                    security_id,
+                    GROUP_CONCAT(type_label, ', ') AS fund_type_breakdown
+                FROM (
+                    SELECT
+                        security_id,
+                        fund_type || ': ' || COUNT(DISTINCT fund_id) AS type_label
+                    FROM qualified_buyers
+                    GROUP BY security_id, fund_type
+                    ORDER BY security_id, COUNT(DISTINCT fund_id) DESC, fund_type ASC
+                )
+                GROUP BY security_id
+            )
+            SELECT
+                qb.cusip,
+                qb.ticker,
+                qb.company_name,
+                qb.security_class,
+                COUNT(DISTINCT qb.fund_id) AS funds_buying,
+                GROUP_CONCAT(qb.fund_name, ', ') AS funds,
+                CAST(ROUND(SUM(qb.added_value_usd), 0) AS INTEGER) AS total_dollars_added,
+                tb.fund_type_breakdown
+            FROM (SELECT * FROM qualified_buyers ORDER BY fund_name) qb
+            JOIN type_breakdown tb ON qb.security_id = tb.security_id
+            GROUP BY qb.security_id, qb.cusip, qb.ticker, qb.company_name, qb.security_class, tb.fund_type_breakdown
+            HAVING COUNT(DISTINCT qb.fund_id) >= ?
+            ORDER BY funds_buying DESC, total_dollars_added DESC
+        """
+        return pd.read_sql_query(
+            query,
+            conn,
+            params=(period, period, min_pct_increase, min_added_value, min_funds),
+        )
 
 
 def get_qoq_new_positions(period: str) -> pd.DataFrame:

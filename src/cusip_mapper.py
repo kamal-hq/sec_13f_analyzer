@@ -36,7 +36,7 @@ def sic_to_sector(sic: str | int | None) -> str:
     if (1300 <= code <= 1389) or (2900 <= code <= 2999) or (4600 <= code <= 4699) or (4920 <= code <= 4925):
         return "Energy"
     # Materials: Mining (1000-1299, 1400-1499), Wood/Paper (2400-2499, 2600-2699),
-    # Chemicals ex-drugs/cosmetics (2800-2829, 2850-2899), Plastics/Glass/Metals (3050-3089, 3200-3399)
+    # Chemicals ex-drugs/cosmetics (2800-2829, 2850-2899), Plastics/Glass/Metals/Cans (3050-3089, 3200-3419)
     if (
         (1000 <= code <= 1299)
         or (1400 <= code <= 1499)
@@ -45,7 +45,7 @@ def sic_to_sector(sic: str | int | None) -> str:
         or (2800 <= code <= 2829)
         or (2850 <= code <= 2899)
         or (3050 <= code <= 3089)
-        or (3200 <= code <= 3399)
+        or (3200 <= code <= 3419)
     ):
         return "Materials"
     # Healthcare: Drugs/Biologicals (2830-2836), Medical instruments (3840-3851), Medical plans (6324), Health services (8000-8099)
@@ -80,7 +80,7 @@ def sic_to_sector(sic: str | int | None) -> str:
     ):
         return "Consumer Staples"
     # Consumer Discretionary: Homebuilders (1520-1531), Apparel/Furniture/Footwear (2200-2399, 2500-2599, 3011-3049, 3100-3199),
-    # Appliances/Audio (3630-3659), Autos (3711-3716, 3751), Toys/Misc (3900-3999), Retail/Restaurants/Hotels/Leisure
+    # Appliances/Audio (3630-3659), Autos (3711-3716, 3751), Toys/Misc (3900-3999), Travel agencies (4700), Retail/Restaurants/Hotels/Leisure
     if (
         (1520 <= code <= 1531)
         or (2200 <= code <= 2399)
@@ -89,7 +89,7 @@ def sic_to_sector(sic: str | int | None) -> str:
         or (3100 <= code <= 3199)
         or (3630 <= code <= 3659)
         or (3711 <= code <= 3716)
-        or code == 3751
+        or code in (3751, 4700)
         or (3900 <= code <= 3999)
         or (5010 <= code <= 5015)
         or (5130 <= code <= 5139)
@@ -112,6 +112,30 @@ def sic_to_sector(sic: str | int | None) -> str:
     ):
         return "Industrials"
     return "Unknown"
+
+
+# Overrides for issuers where legacy 1987 SEC SIC codes (e.g. 7389 Business Services, 2670 Paper Products, 4400 Water Transport)
+# misclassify modern GICS sectors.
+TICKER_SECTOR_OVERRIDES: dict[str, str] = {
+    "BKNG": "Consumer Discretionary",
+    "ABNB": "Consumer Discretionary",
+    "EXPE": "Consumer Discretionary",
+    "CCL": "Consumer Discretionary",
+    "RCL": "Consumer Discretionary",
+    "NCLH": "Consumer Discretionary",
+    "FIVE": "Consumer Discretionary",
+    "KMB": "Consumer Staples",
+    "CASY": "Consumer Staples",
+    "ACN": "Technology",
+    "IT": "Technology",
+    "NOVT": "Technology",
+    "V": "Financials",
+    "MA": "Financials",
+    "PYPL": "Financials",
+    "FIS": "Financials",
+    "FI": "Financials",
+    "GPN": "Financials",
+}
 
 
 def load_sector_cache(cache_path: str = SECTOR_CACHE_PATH) -> dict[str, dict[str, Any]]:
@@ -148,11 +172,12 @@ def map_sectors(tickers: list[str], fetch_uncached: bool = False) -> dict[str, s
     updated = False
     for t, entry in list(sector_cache.items()):
         if isinstance(entry, dict):
-            if "sector" not in entry or not entry["sector"]:
-                entry["sector"] = sic_to_sector(entry.get("sic"))
+            desired = TICKER_SECTOR_OVERRIDES.get(t) or sic_to_sector(entry.get("sic"))
+            if entry.get("sector") != desired:
+                entry["sector"] = desired
                 updated = True
         elif isinstance(entry, str):
-            sector_cache[t] = {"sic": None, "sic_description": None, "sector": entry}
+            sector_cache[t] = {"sic": None, "sic_description": None, "sector": TICKER_SECTOR_OVERRIDES.get(t, entry)}
             updated = True
 
     if fetch_uncached:
@@ -179,7 +204,7 @@ def map_sectors(tickers: list[str], fetch_uncached: bool = False) -> dict[str, s
                             "cik": cik,
                             "sic": sic,
                             "sic_description": d.get("sicDescription"),
-                            "sector": sic_to_sector(sic),
+                            "sector": TICKER_SECTOR_OVERRIDES.get(t) or sic_to_sector(sic),
                         }
                         updated = True
             except requests.RequestException as exc:
@@ -190,6 +215,9 @@ def map_sectors(tickers: list[str], fetch_uncached: bool = False) -> dict[str, s
 
     result: dict[str, str] = {}
     for t in unique_tickers:
+        if t in TICKER_SECTOR_OVERRIDES:
+            result[t] = TICKER_SECTOR_OVERRIDES[t]
+            continue
         entry = sector_cache.get(t)
         if isinstance(entry, dict):
             sec = entry.get("sector") or sic_to_sector(entry.get("sic"))

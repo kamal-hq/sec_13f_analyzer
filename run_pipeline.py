@@ -9,13 +9,14 @@ from src.analysis import (
     export_to_csv,
     get_aum_by_period,
     get_convergence_signals,
+    get_etf_convergence_signals,
     get_fund_concentration,
     get_fund_summary,
     get_sector_by_period,
     get_top_holdings_by_aum,
 )
 from src.cusip_mapper import map_cusips, map_sectors
-from src.database import bulk_insert_holdings, create_schema, get_connection
+from src.database import bulk_insert_holdings, create_schema, detect_splits, get_connection
 from src.parse_holdings import parse_all_raw_files, validate_parsed_data
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def run_pipeline() -> pd.DataFrame:
     Executes the full 13F data pipeline:
     1. Parse and aggregate raw 13F XML files from data/raw/
     2. Map unique CUSIPs to tickers/names via OpenFIGI + cache, and map tickers to SIC sectors
-    3. Load funds, securities, and holdings (with pct_of_portfolio and qoq_change_flag) into SQLite
+    3. Detect stock splits, load funds, securities, and split-adjusted holdings into SQLite
     4. Export Power BI CSVs to output/
     
     Returns:
@@ -89,7 +90,11 @@ def run_pipeline() -> pd.DataFrame:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    run_pipeline()
+    df_pipeline = run_pipeline()
+
+    print("\n=== Detected Stock Splits (2026-Q1 -> 2026-Q2) ===")
+    splits_df = detect_splits(df_pipeline)
+    print(splits_df.to_string(index=False))
 
     print("\n=== Table Row Counts ===")
     with get_connection() as conn:
@@ -123,7 +128,7 @@ if __name__ == "__main__":
     print("\n=== Top 10 Holdings for Berkshire Hathaway (2026-Q2) ===")
     print(get_fund_concentration("Berkshire Hathaway", "2026-Q2").to_string(index=False))
 
-    print("\n=== Full Universe Convergence Signals (2026-Q2, Top 15) ===")
+    print("\n=== Full Universe Convergence Signals (2026-Q2, Top 15, Operating Equities Only) ===")
     full_signals = get_convergence_signals("2026-Q2", min_funds=4)
     print(f"Total full-universe convergence signals (4+ funds): {len(full_signals)}")
     print(full_signals.head(15).to_string(index=False))
@@ -132,5 +137,11 @@ if __name__ == "__main__":
     disc_signals = get_convergence_signals("2026-Q2", fund_types=DISCRETIONARY_FUND_TYPES)
     print(f"Total discretionary convergence signals (2+ of 3 discretionary funds): {len(disc_signals)}")
     print(disc_signals.head(15).to_string(index=False))
+
+    print("\n=== ETF & Index Trust Convergence Signals (2026-Q2, Separate Table) ===")
+    etf_signals = get_etf_convergence_signals("2026-Q2", min_funds=3)
+    print(f"Total ETF/Index Trust convergence signals (3+ funds): {len(etf_signals)}")
+    print(etf_signals.to_string(index=False))
+
 
 

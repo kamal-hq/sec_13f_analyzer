@@ -78,4 +78,13 @@ COVER_PAGE_TOTALS: dict[str, int] = {
     "0001021944-26-000013": 37253810301,
 }
 
+# Stock split detection configuration and ground-truth overrides (Q1 2026 -> Q2 2026)
+COMMON_SPLIT_FACTORS: tuple[int, ...] = (2, 3, 4, 5, 8, 10, 15, 20, 25, 30)
+
+SPLIT_OVERRIDES: dict[str, float] = {
+    "482480100": 10,  # KLA Corp (KLAC): 10-for-1 stock split on June 11, 2026
+    "09857L108": 25,  # Booking Holdings (BKNG): 25-for-1 stock split on April 2, 2026
+}
+
+
 

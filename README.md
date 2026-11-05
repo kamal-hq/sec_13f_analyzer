@@ -54,22 +54,22 @@ All figures below come directly from SQL queries executed against `data/sec_13f.
      FROM Fact_Holdings GROUP BY period ORDER BY period;
      ```
 
-2. **Full-Universe Smart Money Convergence (`63` qualifying stocks; `6` bought by `5` of `7` funds)**:
-   Under the strict share-based buyer definition (common equity only, `qoq_change_flag = 'NEW'` or share count up `>= 10%` QoQ, and dollar value added `shares_added * Q2_price >= $1,000,000`), **`63`** securities were accumulated by **`4` or more** funds in `2026-Q2`. Six securities were bought by **`5` of `7`** funds, led by **`KLAC` (KLA Corp, `+$2,532,371,809` added)**, **`AMD` (Advanced Micro Devices, `+$1,195,133,634` added)**, **`WFC` (Wells Fargo & Co, `+$903,048,556` added)**, **`BKNG` (Booking Holdings, `+$705,311,721` added)**, **`CBRE` (CBRE Group, `+$268,148,933` added)**, and **`FORM` (FormFactor Inc, `+$119,590,856` added)**.
+2. **Full-Universe Smart Money Convergence (`59` qualifying operating-equity stocks; `4` bought by `5` of `7` funds)**:
+   Under the strict split-adjusted share-based buyer definition (operating common equity only, excluding options and ETFs/index trusts; `qoq_change_flag = 'NEW'` or split-adjusted share count up `>= 10%` QoQ; and dollar value added `shares_added * Q2_price >= $1,000,000`), **`59`** operating equities were accumulated by **`4` or more** funds in `2026-Q2`. Four securities were bought by **`5` of `7`** funds: **`AMD` (Advanced Micro Devices, `+$1,195,133,634` added)**, **`WFC` (Wells Fargo & Co, `+$903,048,556` added)**, **`CBRE` (CBRE Group, `+$268,148,933` added)**, and **`FORM` (FormFactor Inc, `+$119,590,856` added)**, followed among 4-buyer stocks by **`SPCX` (Space Exploration Technologies Corp, `+$2,861,656,740` added)** and **`STX` (Seagate Technology, `+$1,333,294,180` added)**. Stock-split detection (`KLAC` 10-for-1 on June 11, 2026; `BKNG` 25-for-1 on April 2, 2026; `CVNA` 5-for-1) prevented pre- vs. post-split share counts from creating false buyer signals (reducing `KLAC`, `BKNG`, and `CVNA` from 5 unadjusted buyers to 2 true buyers each). ETFs and index trusts (`13` signals with `3+` buyers, led by `IVV` `+$20,871,368,839` across 4 funds and `SPY` `+$943,619,319` across 3 funds) are reported in a separate table (`get_etf_convergence_signals`).
    - *Source query* (`sql/queries.sql` — Query 1 / `get_convergence_signals('2026-Q2', min_funds=4)`):
      ```sql
-     -- See Query 1 in sql/queries.sql (HAVING COUNT(DISTINCT qb.fund_id) >= 4)
+     -- See Query 1 in sql/queries.sql (HAVING COUNT(DISTINCT qb.fund_id) >= 4, excluding ETFs/index trusts)
      ```
 
-3. **Discretionary-Only Convergence (`12` qualifying stocks led by `GOOGL` `+$9.62B` and `GOOG` `+$9.05B`)**:
-   Restricting the universe to the 3 non-hedge discretionary institutions (`Conglomerate`, `Public Pension Fund`, `Sovereign Wealth Fund`: `Berkshire Hathaway`, `CalPERS`, and `Temasek Holdings`, requiring `2+` buyers) yields **`12`** convergence signals. Only **`4`** overlap with the 63-stock full list (`KLAC`, `BKNG`, `WMT`, `AMD`), while **`8`** are unique to the discretionary signal list—led by **`GOOGL` (`+$9,618,617,481` added by Berkshire Hathaway & Temasek Holdings)** and **`GOOG` (`+$9,046,385,016` added by Berkshire Hathaway & Temasek Holdings)**.
+3. **Discretionary-Only Convergence (`10` qualifying stocks led by `GOOGL` `+$9.62B` and `GOOG` `+$9.05B`)**:
+   Restricting the universe to the 3 non-hedge discretionary institutions (`Conglomerate`, `Public Pension Fund`, `Sovereign Wealth Fund`: `Berkshire Hathaway`, `CalPERS`, and `Temasek Holdings`, requiring `2+` buyers) yields **`10`** split-adjusted convergence signals. Only **`2`** overlap with the 59-stock full list (`AMD`, `WMT`), while **`8`** are unique to the discretionary signal list—led by **`GOOGL` (`+$9,618,617,481` added by Berkshire Hathaway & Temasek Holdings)** and **`GOOG` (`+$9,046,385,016` added by Berkshire Hathaway & Temasek Holdings)**.
    - *Source query* (`src/analysis.py::get_convergence_signals('2026-Q2', fund_types=['Conglomerate','Public Pension Fund','Sovereign Wealth Fund'])`):
      ```sql
      -- Query 1 in sql/queries.sql with AND f.fund_type IN ('Conglomerate', 'Public Pension Fund', 'Sovereign Wealth Fund') HAVING COUNT(DISTINCT qb.fund_id) >= 2
      ```
 
-4. **Sector Coverage & Sector Rotation (`Technology` `+$52.93B` / `+23.10%`; `Energy` `-$5.81B` / `-11.18%`)**:
-   SEC EDGAR SIC-to-sector mapping (`data/mappings/sector_cache.json`) covers **89.25%** of common-equity dollar value (**82.07%** of all 13F value including ETF/index options). In `2026-Q2`, common-equity institutional capital rotated most heavily into **`Technology`** (**`+$52,933,434,499`**, from `$229,100,599,115` to `$282,034,033,614`, **+23.10%**) and **`Financials`** (**`+$14,249,245,818`**, from `$153,967,632,776` to `$168,216,878,594`, **+9.25%**), while rotating out of **`Energy`** (**`-$5,808,834,193`**, from `$51,962,745,245` to `$46,153,911,052`, **-11.18%**).
+4. **Sector Coverage & Sector Rotation (`Technology` `+$53.22B` / `+23.13%`; `Energy` `-$5.81B` / `-11.18%`)**:
+   SEC EDGAR SIC-to-sector mapping (`data/mappings/sector_cache.json`) covers **89.42%** of common-equity dollar value (**82.25%** of all 13F value including ETF/index options). In `2026-Q2`, common-equity institutional capital rotated most heavily into **`Technology`** (**`+$53,218,012,069`**, from `$230,064,460,040` to `$283,282,472,109`, **+23.13%**) and **`Financials`** (**`+$14,679,664,217`**, from `$162,164,172,175` to `$176,843,836,392`, **+9.05%**), while rotating out of **`Energy`** (**`-$5,808,834,193`**, from `$51,962,745,245` to `$46,153,911,052`, **-11.18%**).
    - *Source query* (`sql/queries.sql` — Query 6):
      ```sql
      SELECT s.sector,
@@ -89,6 +89,12 @@ All figures below come directly from SQL queries executed against `data/sec_13f.
      -- See Query 4 (Top Holdings by Total Institutional AUM) and Query 5 (Fund Concentration) in sql/queries.sql
      ```
 
+## Limitations
+
+1. **Long-Only Disclosure**: Form 13F only requires reporting of long positions in Section 13(f) US exchange-traded equities and listed `Put`/`Call` options. It omits short equity positions, total-return swaps, OTC derivatives, and non-US local shares—meaning a reported long equity stake may be partially or fully offset by an unreported short leg.
+2. **45-Day Reporting Delay**: Institutional managers have up to 45 calendar days after quarter-end to file Form 13F-HR. High-turnover managers may have already resized or exited quarter-end positions by the time the filing becomes public.
+3. **Quantitative & Market-Making Noise**: Share increases at quantitative and multi-manager hedge funds (`Citadel Advisors`, `Two Sigma Investments`, `Renaissance Technologies`) frequently reflect statistical arbitrage factor rebalancing, market-making inventory, or delta-hedging against options books (`$700.88B` of option notional at Citadel in `2026-Q2`) rather than fundamental directional conviction. Isolating the discretionary subset (`output/discretionary_signals.csv`) helps separate fundamental long-horizon accumulation from quantitative turnover.
+
 ## Tech Stack
 
 - Python 3.10+
@@ -101,3 +107,4 @@ All figures below come directly from SQL queries executed against `data/sec_13f.
 ## Disclaimer
 
 13F data is 45 days delayed and for educational purposes only.
+

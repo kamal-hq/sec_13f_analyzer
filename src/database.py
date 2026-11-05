@@ -6,7 +6,7 @@ import logging
 import os
 import sqlite3
 import pandas as pd
-from config import DB_PATH, FUND_TYPES, TARGET_FUNDS
+from config import COMMON_SPLIT_FACTORS, DB_PATH, FUND_TYPES, SPLIT_OVERRIDES, TARGET_FUNDS
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +211,6 @@ def insert_security(
             conn.close()
 
 
-
 def insert_holding(
     fund_id: int,
     security_id: int,
@@ -254,10 +253,189 @@ def insert_holding(
             conn.close()
 
 
+def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Detects stock splits (forward and reverse) between the prior period and current period.
+    For each CUSIP, computes implied price per share (value/shares) per period using the median
+    across funds. If the Q1/Q2 price ratio is within 5% of a common split factor
+    (2, 3, 4, 5, 8, 10, 15, 20, 25, 30) and median shares move inversely in proportion to the split,
+    flags a split. Ground-truth entries in SPLIT_OVERRIDES override auto-detection.
+
+    Args:
+        df (pd.DataFrame): Holdings DataFrame containing cusip, period, value/value_usd, shares, put_call.
+
+    Returns:
+        pd.DataFrame: Detected splits with columns:
+            cusip, ticker, company_name, split_factor, split_type, detection_source,
+            q1_median_price, q2_median_price, price_ratio_q1_q2, q1_median_shares, q2_median_shares, share_ratio_q2_q1.
+    """
+    work = df.copy()
+    val_col = "value_usd" if "value_usd" in work.columns else "value"
+    name_col = "company_name" if "company_name" in work.columns else "issuer_name"
+    if "ticker" not in work.columns:
+        work["ticker"] = None
+
+    # Exclude options and zero-value/zero-share rows when computing implied equity share prices
+    eq = work[
+        (work["put_call"].isna() | (work["put_call"] == ""))
+        & (work[val_col] > 0)
+        & (work["shares"] > 0)
+    ].copy()
+
+    periods = sorted(eq["period"].unique())
+    if len(periods) < 2:
+        return pd.DataFrame()
+
+    p_prev, p_curr = periods[0], periods[-1]
+    eq["implied_price"] = eq[val_col] / eq["shares"]
+
+    meta = (
+        eq.groupby("cusip", as_index=False)
+        .agg(ticker=("ticker", "first"), company_name=(name_col, "first"))
+        .set_index("cusip")
+    )
+
+    stats = (
+        eq.groupby(["cusip", "period"])
+        .agg(med_price=("implied_price", "median"), med_shares=("shares", "median"))
+        .unstack("period")
+    )
+    if p_prev not in stats["med_price"].columns or p_curr not in stats["med_price"].columns:
+        return pd.DataFrame()
+
+    stats = stats.dropna(subset=[("med_price", p_prev), ("med_price", p_curr)])
+
+    # Also compute matched-fund median share ratio (q2_shares / q1_shares) for funds holding in both periods
+    q1_sh = eq[eq["period"] == p_prev].set_index(["cusip", "fund_cik"])["shares"]
+    q2_sh = eq[eq["period"] == p_curr].set_index(["cusip", "fund_cik"])["shares"]
+    matched_sr = (q2_sh / q1_sh).dropna().groupby("cusip").median()
+
+    detected_rows: list[dict] = []
+    for cusip, row in stats.iterrows():
+        p1 = float(row[("med_price", p_prev)])
+        p2 = float(row[("med_price", p_curr)])
+        s1 = float(row[("med_shares", p_prev)])
+        s2 = float(row[("med_shares", p_curr)])
+        if p2 <= 0 or s1 <= 0:
+            continue
+
+        pr = p1 / p2
+        sr = s2 / s1
+        msr = float(matched_sr.get(cusip, sr))
+
+        ticker = meta.loc[cusip, "ticker"] if cusip in meta.index else None
+        company = meta.loc[cusip, "company_name"] if cusip in meta.index else None
+
+        if cusip in SPLIT_OVERRIDES:
+            factor = float(SPLIT_OVERRIDES[cusip])
+            split_label = f"{int(factor)}-for-1" if factor >= 1 else f"1-for-{int(round(1.0 / factor))}"
+            detected_rows.append(
+                {
+                    "cusip": cusip,
+                    "ticker": ticker,
+                    "company_name": company,
+                    "split_factor": factor,
+                    "split_type": split_label,
+                    "detection_source": "OVERRIDE",
+                    "q1_median_price": round(p1, 2),
+                    "q2_median_price": round(p2, 2),
+                    "price_ratio_q1_q2": round(pr, 3),
+                    "q1_median_shares": int(round(s1)),
+                    "q2_median_shares": int(round(s2)),
+                    "share_ratio_q2_q1": round(sr, 3),
+                }
+            )
+            continue
+
+        for f in COMMON_SPLIT_FACTORS:
+            # Forward split: Q1/Q2 price ratio within 5% of f, and median shares move inversely (~f)
+            if abs(pr - f) / f <= 0.05 and sr > 1.0 and abs(sr - f) / f <= 0.30 and abs(msr - f) / f <= 0.25:
+                detected_rows.append(
+                    {
+                        "cusip": cusip,
+                        "ticker": ticker,
+                        "company_name": company,
+                        "split_factor": float(f),
+                        "split_type": f"{f}-for-1",
+                        "detection_source": "AUTO",
+                        "q1_median_price": round(p1, 2),
+                        "q2_median_price": round(p2, 2),
+                        "price_ratio_q1_q2": round(pr, 3),
+                        "q1_median_shares": int(round(s1)),
+                        "q2_median_shares": int(round(s2)),
+                        "share_ratio_q2_q1": round(sr, 3),
+                    }
+                )
+                break
+
+            # Reverse split: Q2/Q1 price ratio within 5% of f, and median shares move inversely (~1/f)
+            inv_pr = 1.0 / pr if pr > 0 else 0.0
+            inv_sr = 1.0 / sr if sr > 0 else 0.0
+            inv_msr = 1.0 / msr if msr > 0 else 0.0
+            if abs(inv_pr - f) / f <= 0.05 and sr < 1.0 and abs(inv_sr - f) / f <= 0.30 and abs(inv_msr - f) / f <= 0.25:
+                detected_rows.append(
+                    {
+                        "cusip": cusip,
+                        "ticker": ticker,
+                        "company_name": company,
+                        "split_factor": 1.0 / float(f),
+                        "split_type": f"1-for-{f} (Reverse)",
+                        "detection_source": "AUTO",
+                        "q1_median_price": round(p1, 2),
+                        "q2_median_price": round(p2, 2),
+                        "price_ratio_q1_q2": round(pr, 3),
+                        "q1_median_shares": int(round(s1)),
+                        "q2_median_shares": int(round(s2)),
+                        "share_ratio_q2_q1": round(sr, 3),
+                    }
+                )
+                break
+
+    out = pd.DataFrame(detected_rows)
+    if not out.empty:
+        out = out.sort_values(["detection_source", "split_factor", "cusip"], ascending=[False, False, True]).reset_index(drop=True)
+    return out
+
+
+def apply_split_adjustments(df: pd.DataFrame, splits_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    """
+    Adjusts prior-period (Q1) share counts by multiplying by split_factor for forward splits
+    (and dividing by the reverse factor for reverse splits, where split_factor = 1/f) so that
+    all QoQ share comparisons and qoq_change_flag calculations are on a split-adjusted basis.
+    """
+    work = df.copy()
+    if splits_df is None:
+        splits_df = detect_splits(work)
+    if splits_df.empty:
+        return work
+
+    periods = sorted(work["period"].unique())
+    if len(periods) < 2:
+        return work
+    prior_period = periods[0]
+
+    split_map: dict[str, float] = dict(zip(splits_df["cusip"], splits_df["split_factor"]))
+    mask = (work["period"] == prior_period) & (work["cusip"].isin(split_map)) & (work["shares"] > 0)
+
+    if mask.any():
+        factors = work.loc[mask, "cusip"].map(split_map)
+        work.loc[mask, "shares"] = (
+            (work.loc[mask, "shares"] * factors).round().astype("int64").clip(lower=1)
+        )
+        logger.info(
+            "Applied stock split adjustments to %d prior-period (%s) holding rows across %d split CUSIPs.",
+            int(mask.sum()),
+            prior_period,
+            len(split_map),
+        )
+    return work
+
+
 def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Computes pct_of_portfolio per (fund_cik, period) and qoq_change_flag
-    (NULL for earliest period; NEW, INCREASED, DECREASED, EXITED, UNCHANGED for subsequent periods).
+    Applies stock-split adjustments to prior-period shares, then computes pct_of_portfolio
+    per (fund_cik, period) and qoq_change_flag (NULL for earliest period; NEW, INCREASED,
+    DECREASED, EXITED, UNCHANGED for subsequent periods) on split-adjusted shares.
     """
     work = df.copy()
     if "value_usd" not in work.columns and "value" in work.columns:
@@ -267,6 +445,9 @@ def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
     work["put_call"] = work["put_call"].apply(
         lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None
     )
+
+    # Adjust Q1 shares for stock splits before computing QoQ share changes and qoq_change_flag
+    work = apply_split_adjustments(work)
 
     # Compute pct_of_portfolio per fund per period
     period_totals = work.groupby(["fund_cik", "period"])["value_usd"].transform("sum")

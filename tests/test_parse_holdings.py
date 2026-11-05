@@ -241,3 +241,97 @@ def test_all_six_sql_queries_execute_cleanly() -> None:
             df_q = pd.read_sql_query(stmt, conn)
             assert not df_q.empty, f"Query #{i} in sql/queries.sql returned 0 rows"
 
+
+def test_temasek_klac_split_adjusted_change_is_zero() -> None:
+    """
+    Verifies that after applying the 10-for-1 KLAC split (482480100), Temasek Holdings'
+    2026-Q1 split-adjusted share count (32,387 * 10 = 323,870) matches its 2026-Q2 share count (323,870),
+    yielding a 0.0% QoQ share change and qoq_change_flag == 'UNCHANGED'.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT h.period, h.shares, h.qoq_change_flag
+            FROM Fact_Holdings h
+            JOIN Dim_Fund f ON h.fund_id = f.fund_id
+            JOIN Dim_Security s ON h.security_id = s.security_id
+            WHERE f.name = 'Temasek Holdings'
+              AND s.cusip = '482480100'
+            ORDER BY h.period
+            """
+        ).fetchall()
+
+    assert len(rows) == 2
+    q1_row, q2_row = rows[0], rows[1]
+    assert q1_row["period"] == "2026-Q1"
+    assert q2_row["period"] == "2026-Q2"
+    assert int(q1_row["shares"]) == 323_870
+    assert int(q2_row["shares"]) == 323_870
+    pct_change = (q2_row["shares"] - q1_row["shares"]) / q1_row["shares"]
+    assert abs(pct_change) < 1e-9
+    assert q2_row["qoq_change_flag"] == "UNCHANGED"
+
+
+def test_klac_and_bkng_do_not_appear_with_old_buyer_counts() -> None:
+    """
+    Verifies that KLAC (10-for-1 split) and BKNG (25-for-1 split) no longer appear in the 4+ fund
+    convergence signals or the 2+ discretionary convergence signals, and each has only 2 actual buyers
+    instead of their pre-split-corrupted count of 5.
+    """
+    from src.analysis import get_convergence_signals
+
+    full_signals = get_convergence_signals("2026-Q2", min_funds=4)
+    assert "KLAC" not in full_signals["ticker"].values
+    assert "BKNG" not in full_signals["ticker"].values
+    assert "482480100" not in full_signals["cusip"].values
+    assert "09857L108" not in full_signals["cusip"].values
+
+    disc_signals = get_convergence_signals(
+        "2026-Q2",
+        fund_types=["Conglomerate", "Public Pension Fund", "Sovereign Wealth Fund"],
+    )
+    assert "KLAC" not in disc_signals["ticker"].values
+    assert "BKNG" not in disc_signals["ticker"].values
+
+    # Even with min_funds=1, both KLAC and BKNG have only 2 true buyers (not 5)
+    all_buyers = get_convergence_signals("2026-Q2", min_funds=1)
+    klac_row = all_buyers[all_buyers["cusip"] == "482480100"]
+    bkng_row = all_buyers[all_buyers["cusip"] == "09857L108"]
+    assert len(klac_row) == 1 and int(klac_row.iloc[0]["funds_buying"]) == 2
+    assert len(bkng_row) == 1 and int(bkng_row.iloc[0]["funds_buying"]) == 2
+
+
+def test_etfs_excluded_from_convergence_and_shown_separately() -> None:
+    """Verifies ETFs and index trusts (IVV, SPY, VOO, QQQ, etc.) are excluded from convergence signals and returned separately."""
+    from src.analysis import get_convergence_signals, get_etf_convergence_signals
+
+    full_signals = get_convergence_signals("2026-Q2", min_funds=3)
+    for etf_ticker in ("IVV", "SPY", "VOO", "QQQ", "XLE", "GDX", "XLV", "TLT", "GLD"):
+        assert etf_ticker not in full_signals["ticker"].dropna().values
+
+    etf_signals = get_etf_convergence_signals("2026-Q2", min_funds=3)
+    assert not etf_signals.empty
+    assert "IVV" in etf_signals["ticker"].values
+    assert "SPY" in etf_signals["ticker"].values
+    assert "VOO" in etf_signals["ticker"].values
+
+
+def test_top_signal_sector_mappings_fixed() -> None:
+    """Verifies sector overrides for BKNG (Consumer Discretionary), KMB (Consumer Staples), and ACN/IT (Technology)."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT ticker, sector
+            FROM Dim_Security
+            WHERE ticker IN ('BKNG', 'KMB', 'ACN', 'IT', 'V', 'MA')
+            """
+        ).fetchall()
+    sector_by_ticker = {r["ticker"]: r["sector"] for r in rows}
+    assert sector_by_ticker["BKNG"] == "Consumer Discretionary"
+    assert sector_by_ticker["KMB"] == "Consumer Staples"
+    assert sector_by_ticker["ACN"] == "Technology"
+    assert sector_by_ticker["IT"] == "Technology"
+    assert sector_by_ticker["V"] == "Financials"
+    assert sector_by_ticker["MA"] == "Financials"
+
+
