@@ -36,9 +36,10 @@ FUND_TYPES: dict[str, str] = {
     "0001423053": "Hedge Fund",
     "0001179392": "Hedge Fund",
     "0001350694": "Hedge Fund",
-    "0000919079": "Pension Fund",
+    "0000919079": "Public Pension Fund",
     "0001021944": "Sovereign Wealth Fund",
 }
+
 
 # Mapping of active filing accession numbers to reporting periods (updated automatically by fetch_13f.py)
 # Note: Citadel 2026-Q2 uses 13F-HR/A full restatement 0001104659-26-104387 (superseding 0001104659-26-097200)

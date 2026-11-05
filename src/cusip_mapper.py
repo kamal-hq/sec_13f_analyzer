@@ -9,12 +9,196 @@ import os
 import time
 from typing import Any
 import requests
-from config import OPENFIGI_API_KEY, OPENFIGI_URL
+from config import OPENFIGI_API_KEY, OPENFIGI_URL, RATE_LIMIT_DELAY, SEC_BASE_URL, SEC_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
 CACHE_PATH = os.path.join("data", "mappings", "cusip_cache.json")
+SECTOR_CACHE_PATH = os.path.join("data", "mappings", "sector_cache.json")
 _SESSION = requests.Session()
+
+
+def sic_to_sector(sic: str | int | None) -> str:
+    """
+    Maps a 4-digit SEC Standard Industrial Classification (SIC) code to a broad sector group,
+    with 'Unknown' as fallback.
+    """
+    if sic is None or str(sic).strip() == "":
+        return "Unknown"
+    try:
+        code = int(str(sic).strip())
+    except ValueError:
+        return "Unknown"
+
+    if code <= 0:
+        return "Unknown"
+    # Energy: Oil & Gas extraction (1300-1389), Petroleum refining (2900-2999), Pipelines (4600-4699), Natural gas transmission (4920-4925)
+    if (1300 <= code <= 1389) or (2900 <= code <= 2999) or (4600 <= code <= 4699) or (4920 <= code <= 4925):
+        return "Energy"
+    # Materials: Mining (1000-1299, 1400-1499), Wood/Paper (2400-2499, 2600-2699),
+    # Chemicals ex-drugs/cosmetics (2800-2829, 2850-2899), Plastics/Glass/Metals (3050-3089, 3200-3399)
+    if (
+        (1000 <= code <= 1299)
+        or (1400 <= code <= 1499)
+        or (2400 <= code <= 2499)
+        or (2600 <= code <= 2699)
+        or (2800 <= code <= 2829)
+        or (2850 <= code <= 2899)
+        or (3050 <= code <= 3089)
+        or (3200 <= code <= 3399)
+    ):
+        return "Materials"
+    # Healthcare: Drugs/Biologicals (2830-2836), Medical instruments (3840-3851), Medical plans (6324), Health services (8000-8099)
+    if (2830 <= code <= 2836) or (3840 <= code <= 3851) or code == 6324 or (8000 <= code <= 8099):
+        return "Healthcare"
+    # Technology: Semiconductor machinery (3559), Computers (3570-3579), Comms equipment & semiconductors (3660-3679),
+    # Measuring/Optical/Test instruments (3820-3829), Software/IT (7370-7379)
+    if code == 3559 or (3570 <= code <= 3579) or (3660 <= code <= 3679) or (3820 <= code <= 3829) or (7370 <= code <= 7379):
+        return "Technology"
+    # Communication Services: Publishing (2711-2741), Telecom/Broadcast (4800-4899), Advertising (7310-7319), Motion pictures (7800-7899)
+    if (2711 <= code <= 2741) or (4800 <= code <= 4899) or (7310 <= code <= 7319) or (7800 <= code <= 7899):
+        return "Communication Services"
+    # Utilities: Electric, gas, water & sanitary services (4900-4999, except 4920-4925)
+    if 4900 <= code <= 4999:
+        return "Utilities"
+    # Real Estate: Real estate operators/developers (6500-6599) and REITs (6798)
+    if (6500 <= code <= 6599) or code == 6798:
+        return "Real Estate"
+    # Financials: Banks, credit, brokers, insurance, investment offices (6000-6799, except 6324, 6500-6599, 6798) & Credit agencies (7320)
+    if (6000 <= code <= 6799) or code == 7320:
+        return "Financials"
+    # Consumer Staples: Agriculture (0100-0999), Food/Beverage/Tobacco (2000-2199), Soaps/Cosmetics (2840-2844),
+    # Grocery/Beer wholesale & retail (5140-5149, 5180-5189, 5331, 5400-5499, 5912)
+    if (
+        (100 <= code <= 999)
+        or (2000 <= code <= 2199)
+        or (2840 <= code <= 2844)
+        or (5140 <= code <= 5149)
+        or (5180 <= code <= 5189)
+        or code in (5331, 5912)
+        or (5400 <= code <= 5499)
+    ):
+        return "Consumer Staples"
+    # Consumer Discretionary: Homebuilders (1520-1531), Apparel/Furniture/Footwear (2200-2399, 2500-2599, 3011-3049, 3100-3199),
+    # Appliances/Audio (3630-3659), Autos (3711-3716, 3751), Toys/Misc (3900-3999), Retail/Restaurants/Hotels/Leisure
+    if (
+        (1520 <= code <= 1531)
+        or (2200 <= code <= 2399)
+        or (2500 <= code <= 2599)
+        or (3011 <= code <= 3049)
+        or (3100 <= code <= 3199)
+        or (3630 <= code <= 3659)
+        or (3711 <= code <= 3716)
+        or code == 3751
+        or (3900 <= code <= 3999)
+        or (5010 <= code <= 5015)
+        or (5130 <= code <= 5139)
+        or (5200 <= code <= 5999)
+        or (7000 <= code <= 7299)
+        or (7500 <= code <= 7599)
+        or (7900 <= code <= 7999)
+        or (8200 <= code <= 8299)
+    ):
+        return "Consumer Discretionary"
+    # Industrials: Heavy construction, machinery, electrical apparatus, aerospace/defense/rail, instruments, transportation, wholesale, business/engineering services
+    if (
+        (1500 <= code <= 1799)
+        or (2700 <= code <= 2799)
+        or (3400 <= code <= 3899)
+        or (4000 <= code <= 4799)
+        or (5000 <= code <= 5199)
+        or (7300 <= code <= 7699)
+        or (8100 <= code <= 8999)
+    ):
+        return "Industrials"
+    return "Unknown"
+
+
+def load_sector_cache(cache_path: str = SECTOR_CACHE_PATH) -> dict[str, dict[str, Any]]:
+    """Loads existing ticker -> SIC/sector mappings from data/mappings/sector_cache.json."""
+    if not os.path.exists(cache_path):
+        return {}
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to load sector cache from %s: %s", cache_path, exc)
+        return {}
+
+
+def save_sector_cache(mapping: dict[str, dict[str, Any]], cache_path: str = SECTOR_CACHE_PATH) -> None:
+    """Writes the full sector cache dict to data/mappings/sector_cache.json."""
+    cache_dir = os.path.dirname(cache_path)
+    if cache_dir:
+        os.makedirs(cache_dir, exist_ok=True)
+    with open(cache_path, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, indent=2, sort_keys=True)
+
+
+def map_sectors(tickers: list[str], fetch_uncached: bool = False) -> dict[str, str]:
+    """
+    Maps tickers to broad sector groups using the SEC submissions API SIC code cached in
+    data/mappings/sector_cache.json, with 'Unknown' as fallback.
+    """
+    sector_cache = load_sector_cache()
+    unique_tickers = [str(t).strip().upper() for t in dict.fromkeys(tickers) if t and str(t).strip() and str(t) != "None"]
+
+    # Ensure every entry in sector_cache has its computed broad sector field
+    updated = False
+    for t, entry in list(sector_cache.items()):
+        if isinstance(entry, dict):
+            if "sector" not in entry or not entry["sector"]:
+                entry["sector"] = sic_to_sector(entry.get("sic"))
+                updated = True
+        elif isinstance(entry, str):
+            sector_cache[t] = {"sic": None, "sic_description": None, "sector": entry}
+            updated = True
+
+    if fetch_uncached:
+        uncached = [t for t in unique_tickers if t not in sector_cache]
+        if uncached:
+            headers = {"User-Agent": os.getenv("SEC_USER_AGENT", SEC_USER_AGENT), "Accept-Encoding": "gzip, deflate"}
+            try:
+                resp = _SESSION.get("https://www.sec.gov/files/company_tickers.json", headers=headers, timeout=30)
+                resp.raise_for_status()
+                ticker_to_cik = {
+                    item["ticker"].upper(): str(item["cik_str"]).zfill(10)
+                    for item in resp.json().values()
+                }
+                for t in uncached:
+                    cik = ticker_to_cik.get(t)
+                    if not cik:
+                        continue
+                    time.sleep(RATE_LIMIT_DELAY)
+                    sub = _SESSION.get(f"{SEC_BASE_URL}/submissions/CIK{cik}.json", headers=headers, timeout=20)
+                    if sub.status_code == 200:
+                        d = sub.json()
+                        sic = d.get("sic")
+                        sector_cache[t] = {
+                            "cik": cik,
+                            "sic": sic,
+                            "sic_description": d.get("sicDescription"),
+                            "sector": sic_to_sector(sic),
+                        }
+                        updated = True
+            except requests.RequestException as exc:
+                logger.warning("Could not fetch uncached SEC SIC codes: %s", exc)
+
+    if updated:
+        save_sector_cache(sector_cache)
+
+    result: dict[str, str] = {}
+    for t in unique_tickers:
+        entry = sector_cache.get(t)
+        if isinstance(entry, dict):
+            sec = entry.get("sector") or sic_to_sector(entry.get("sic"))
+            result[t] = sec if sec else "Unknown"
+        elif isinstance(entry, str) and entry:
+            result[t] = entry
+        else:
+            result[t] = "Unknown"
+    return result
 
 
 def load_cusip_cache(cache_path: str = CACHE_PATH) -> dict[str, dict[str, str | None]]:
@@ -186,4 +370,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     sample_cusips = ["037833100"]  # Example Apple CUSIP
     print(map_cusips(sample_cusips))
+
 

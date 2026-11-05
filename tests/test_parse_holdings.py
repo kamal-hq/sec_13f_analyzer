@@ -177,3 +177,67 @@ def test_fund_period_sum_value_matches_cover_page_table_value_total(
         # Earliest period (2026-Q1) must have NULL qoq_change_flag for all rows
         if period == "2026-Q1":
             assert int(row["non_null_flags"]) == 0
+
+
+def test_dim_security_has_security_class_and_sector_coverage() -> None:
+    """Verifies Dim_Security stores security_class and maps SIC sectors covering >70% of equity value."""
+    with get_connection() as conn:
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(Dim_Security)").fetchall()]
+        assert "security_class" in cols
+        assert "sector" in cols
+
+        cov = conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN s.sector != 'Unknown' AND (h.put_call IS NULL OR h.put_call = '') THEN h.value_usd ELSE 0 END) * 100.0
+                / SUM(CASE WHEN h.put_call IS NULL OR h.put_call = '' THEN h.value_usd ELSE 0 END) AS eq_cov_pct
+            FROM Fact_Holdings h
+            JOIN Dim_Security s ON h.security_id = s.security_id
+            WHERE h.value_usd > 0
+            """
+        ).fetchone()
+        assert float(cov["eq_cov_pct"]) >= 75.0
+
+
+def test_redefined_convergence_signals_and_discretionary_subset() -> None:
+    """Verifies get_convergence_signals enforces >=4 funds, >=10% share increase or NEW, >=$1M added, and fund_types."""
+    from src.analysis import get_convergence_signals
+
+    full_df = get_convergence_signals("2026-Q2", min_funds=4)
+    assert not full_df.empty
+    expected_cols = {
+        "cusip",
+        "ticker",
+        "company_name",
+        "sector",
+        "funds_buying",
+        "funds",
+        "total_dollars_added",
+        "fund_type_breakdown",
+    }
+    assert expected_cols.issubset(set(full_df.columns))
+    assert (full_df["funds_buying"] >= 4).all()
+    assert (full_df["total_dollars_added"] >= 4_000_000).all()
+
+    disc_df = get_convergence_signals(
+        "2026-Q2",
+        fund_types=["Conglomerate", "Public Pension Fund", "Sovereign Wealth Fund"],
+    )
+    assert not disc_df.empty
+    assert (disc_df["funds_buying"] >= 2).all()
+    assert "GOOGL" in disc_df["ticker"].values
+
+
+def test_all_six_sql_queries_execute_cleanly() -> None:
+    """Executes all 6 queries in sql/queries.sql against data/sec_13f.db and verifies non-empty results."""
+    with open(os.path.join("sql", "queries.sql"), "r", encoding="utf-8") as f:
+        sql_text = f.read()
+
+    statements = [stmt.strip() for stmt in sql_text.split(";") if stmt.strip()]
+    assert len(statements) == 6, f"Expected 6 SQL queries in sql/queries.sql, found {len(statements)}"
+
+    with get_connection() as conn:
+        for i, stmt in enumerate(statements, 1):
+            df_q = pd.read_sql_query(stmt, conn)
+            assert not df_q.empty, f"Query #{i} in sql/queries.sql returned 0 rows"
+

@@ -47,6 +47,7 @@ def create_schema() -> None:
         cusip TEXT UNIQUE NOT NULL,
         ticker TEXT,
         company_name TEXT,
+        security_class TEXT,
         sector TEXT
     );
     
@@ -78,6 +79,7 @@ def create_schema() -> None:
                 cusip TEXT UNIQUE NOT NULL,
                 ticker TEXT,
                 company_name TEXT,
+                security_class TEXT,
                 sector TEXT
             );
 
@@ -114,6 +116,10 @@ def create_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_fact_security ON Fact_Holdings(security_id);
             """
         )
+        # Ensure security_class column exists if migrating an older Dim_Security table
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(Dim_Security)").fetchall()]
+        if "security_class" not in cols:
+            conn.execute("ALTER TABLE Dim_Security ADD COLUMN security_class TEXT")
     logger.info("Star schema verified at %s", DB_PATH)
 
 
@@ -159,16 +165,18 @@ def insert_security(
     ticker: str | None,
     company_name: str | None,
     sector: str | None,
+    security_class: str | None = None,
     _conn: sqlite3.Connection | None = None,
 ) -> int:
     """
-    Inserts or ignores a security record.
+    Inserts or updates a security record with its security_class (titleOfClass) and SIC-mapped sector.
     
     Args:
         cusip (str): CUSIP identifier.
         ticker (str): Ticker symbol.
         company_name (str): Issuer name.
-        sector (str): Sector name.
+        sector (str): Broad sector name mapped from SEC SIC code ('Unknown' fallback).
+        security_class (str | None): 13F titleOfClass (e.g., COM, CL A).
         
     Returns:
         int: The security_id of the inserted or existing record.
@@ -177,21 +185,23 @@ def insert_security(
     conn = _conn if _conn is not None else get_connection()
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO Dim_Security (cusip, ticker, company_name, sector) VALUES (?, ?, ?, ?)",
-            (cusip, ticker, company_name, sector),
+            """
+            INSERT OR IGNORE INTO Dim_Security (cusip, ticker, company_name, security_class, sector)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (cusip, ticker, company_name, security_class, sector or "Unknown"),
         )
-        # Backfill ticker/company_name/sector if previously NULL
-        if ticker or company_name or sector:
-            conn.execute(
-                """
-                UPDATE Dim_Security
-                SET ticker = COALESCE(ticker, ?),
-                    company_name = COALESCE(company_name, ?),
-                    sector = COALESCE(sector, ?)
-                WHERE cusip = ?
-                """,
-                (ticker, company_name, sector, cusip),
-            )
+        conn.execute(
+            """
+            UPDATE Dim_Security
+            SET ticker = COALESCE(?, ticker),
+                company_name = COALESCE(?, company_name),
+                security_class = COALESCE(?, security_class),
+                sector = COALESCE(?, sector)
+            WHERE cusip = ?
+            """,
+            (ticker, company_name, security_class, sector, cusip),
+        )
         row = conn.execute("SELECT security_id FROM Dim_Security WHERE cusip = ?", (cusip,)).fetchone()
         if own_conn:
             conn.commit()
@@ -199,6 +209,7 @@ def insert_security(
     finally:
         if own_conn:
             conn.close()
+
 
 
 def insert_holding(
@@ -352,20 +363,23 @@ def bulk_insert_holdings(df: pd.DataFrame) -> None:
 
             # 3. Insert unique securities and cache security_id by cusip
             security_ids: dict[str, int] = {}
-            sec_cols = [c for c in ["cusip", "ticker", "company_name", "issuer_name", "sector", "title_of_class"] if c in enriched_df.columns]
+            sec_cols = [c for c in ["cusip", "ticker", "company_name", "issuer_name", "security_class", "title_of_class", "sector"] if c in enriched_df.columns]
             unique_sec_df = enriched_df[sec_cols].drop_duplicates(subset=["cusip"])
             for sec_row in unique_sec_df.to_dict("records"):
                 cusip = sec_row["cusip"]
                 ticker = sec_row.get("ticker")
                 company_name = sec_row.get("company_name") or sec_row.get("issuer_name")
-                sector = sec_row.get("sector") or sec_row.get("title_of_class")
+                security_class = sec_row.get("security_class") or sec_row.get("title_of_class")
+                sector = sec_row.get("sector") or "Unknown"
                 security_ids[cusip] = insert_security(
                     cusip=cusip,
                     ticker=ticker if pd.notna(ticker) else None,
                     company_name=company_name if pd.notna(company_name) else None,
-                    sector=sector if pd.notna(sector) else None,
+                    sector=sector if pd.notna(sector) else "Unknown",
+                    security_class=security_class if pd.notna(security_class) else None,
                     _conn=conn,
                 )
+
 
             # 4. Insert all holdings into Fact_Holdings
             for row in enriched_df.to_dict("records"):
