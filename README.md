@@ -28,10 +28,28 @@ The system follows a 5-layer pipeline: Source → Fetch → Parse → Store → 
 
 ## Usage
 
-1. Run `python src/fetch_13f.py` first OR manually place XMLs in `data/raw/`.
-2. Run `python src/parse_holdings.py`.
-3. Run `python src/database.py`.
-4. Run `python src/analysis.py` in sequence.
+1. **(Optional) Download raw 13F information-table XMLs from SEC EDGAR**:
+   ```bash
+   python -m src.fetch_13f
+   ```
+2. **Run the complete end-to-end pipeline** (parses XMLs, maps CUSIPs & SIC sectors, confirms stock splits via `yfinance` / `split_cache.json`, loads SQLite star schema `data/sec_13f.db`, exports all 6 Power BI CSVs to `output/`, and prints summary tables):
+   ```bash
+   python run_pipeline.py
+   ```
+3. **Run the verification test suite** (37 unit and data-integrity tests):
+   ```bash
+   python -m pytest -v
+   ```
+
+### Exported Power BI & Research Outputs (`output/`)
+- `output/convergence_signals.csv` — Full-universe seasoned common-equity convergence (`4+` of `7` funds buying)
+- `output/discretionary_signals.csv` — Discretionary long-horizon convergence (`2+` of `3` discretionary funds buying)
+- `output/new_positions_signals.csv` — New to the sample (no prior-quarter holders) (`is_new_listing = 1`, `3+` funds buying)
+- `output/top_holdings.csv` — Top 50 common-equity holdings by aggregate institutional AUM (`2026-Q2`)
+- `output/fund_summary.csv` — Per-fund, per-period AUM (with and without options), position counts, and Top-10 concentration
+- `output/sector_by_period.csv` — Institutional common-equity AUM and QoQ dollar rotation by sector (`2026-Q1` vs `2026-Q2`)
+- `output/data_dictionary.md` — Column-by-column schema and business logic reference for all 6 CSVs
+- `output/research_note.md` — Full quantitative research note with query-backed tables and raw XML audit trails
 
 ## Database Schema
 

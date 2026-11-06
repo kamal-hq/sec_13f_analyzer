@@ -2,3 +2,5 @@ requests
 pandas
 lxml
 python-dotenv
+yfinance
+pytest
