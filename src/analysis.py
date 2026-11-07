@@ -114,7 +114,9 @@ def get_convergence_signals(
 
     Returns:
         pd.DataFrame: Convergence signals with columns:
-            cusip, ticker, company_name, sector, is_new_listing, funds_buying, funds, total_dollars_added, fund_type_breakdown.
+            cusip, ticker, company_name, sector, is_new_listing, funds_buying,
+            hedge_fund_buyers, discretionary_buyers, buyer_mix,
+            funds, total_dollars_added, fund_type_breakdown.
     """
     with get_connection() as conn:
         fund_type_clause = ""
@@ -223,6 +225,23 @@ def get_convergence_signals(
                 SELECT
                     issuer_id,
                     COUNT(DISTINCT fund_id) AS funds_buying,
+                    COUNT(DISTINCT CASE WHEN fund_type = 'Hedge Fund' THEN fund_id END) AS hedge_fund_buyers,
+                    COUNT(
+                        DISTINCT CASE
+                            WHEN fund_type IN ('Conglomerate', 'Public Pension Fund', 'Sovereign Wealth Fund')
+                            THEN fund_id
+                        END
+                    ) AS discretionary_buyers,
+                    CASE
+                        WHEN COUNT(
+                            DISTINCT CASE
+                                WHEN fund_type IN ('Conglomerate', 'Public Pension Fund', 'Sovereign Wealth Fund')
+                                THEN fund_id
+                            END
+                        ) = 0
+                        THEN 'Hedge-fund-only'
+                        ELSE 'Includes discretionary'
+                    END AS buyer_mix,
                     REPLACE(GROUP_CONCAT(DISTINCT fund_name), ',', ', ') AS funds
                 FROM (SELECT * FROM qualified_buyers ORDER BY fund_name ASC)
                 GROUP BY issuer_id
@@ -234,6 +253,9 @@ def get_convergence_signals(
                 im.sector,
                 im.is_new_listing,
                 ifd.funds_buying,
+                ifd.hedge_fund_buyers,
+                ifd.discretionary_buyers,
+                ifd.buyer_mix,
                 ifd.funds,
                 CAST(ROUND(SUM(qb.added_value_usd), 0) AS INTEGER) AS total_dollars_added,
                 tb.fund_type_breakdown
@@ -241,7 +263,19 @@ def get_convergence_signals(
             JOIN issuer_meta im ON qb.issuer_id = im.issuer_id
             JOIN issuer_funds ifd ON qb.issuer_id = ifd.issuer_id
             JOIN type_breakdown tb ON qb.issuer_id = tb.issuer_id
-            GROUP BY qb.issuer_id, im.cusip, im.ticker, im.company_name, im.sector, im.is_new_listing, ifd.funds_buying, ifd.funds, tb.fund_type_breakdown
+            GROUP BY
+                qb.issuer_id,
+                im.cusip,
+                im.ticker,
+                im.company_name,
+                im.sector,
+                im.is_new_listing,
+                ifd.funds_buying,
+                ifd.hedge_fund_buyers,
+                ifd.discretionary_buyers,
+                ifd.buyer_mix,
+                ifd.funds,
+                tb.fund_type_breakdown
             HAVING ifd.funds_buying >= ?
             ORDER BY funds_buying DESC, total_dollars_added DESC
         """
@@ -665,47 +699,53 @@ def get_fund_summary() -> pd.DataFrame:
         return pd.read_sql_query(query, conn)
 
 
-def get_sector_by_period() -> pd.DataFrame:
+def get_fund_aum() -> pd.DataFrame:
     """
-    Produces a sector-by-period breakdown of institutional AUM (output/sector_by_period.csv),
-    showing both common-equity AUM (excluding options) and total AUM (including options).
+    Produces a long-format fund AUM table per period for Power BI (output/fund_aum.csv),
+    with columns: period, fund, fund_type, aum_with_options, aum_equity_only.
 
     Returns:
-        pd.DataFrame: Sector AUM and portfolio share per period.
+        pd.DataFrame: Long-format fund AUM per period.
     """
     query = """
-        WITH period_totals AS (
-            SELECT
-                period,
-                SUM(CASE WHEN value_usd > 0 AND (put_call IS NULL OR put_call = '') THEN value_usd ELSE 0 END) AS period_equity_aum,
-                SUM(CASE WHEN value_usd > 0 THEN value_usd ELSE 0 END) AS period_total_aum
-            FROM Fact_Holdings
-            GROUP BY period
-        )
+        SELECT
+            h.period,
+            f.name AS fund,
+            f.fund_type,
+            SUM(CASE WHEN h.value_usd > 0 THEN h.value_usd ELSE 0 END) AS aum_with_options,
+            SUM(CASE WHEN h.value_usd > 0 AND (h.put_call IS NULL OR h.put_call = '') THEN h.value_usd ELSE 0 END) AS aum_equity_only
+        FROM Fact_Holdings h
+        JOIN Dim_Fund f ON h.fund_id = f.fund_id
+        WHERE h.value_usd > 0
+          AND (h.qoq_change_flag IS NULL OR h.qoq_change_flag != 'EXITED')
+        GROUP BY h.period, f.fund_id, f.name, f.fund_type
+        ORDER BY h.period ASC, aum_with_options DESC
+    """
+    with get_connection() as conn:
+        return pd.read_sql_query(query, conn)
+
+
+def get_sector_by_period() -> pd.DataFrame:
+    """
+    Produces a long-format sector-by-period breakdown of institutional common-equity AUM
+    (output/sector_by_period.csv), with columns: period, sector, value_usd, fund_count.
+
+    Returns:
+        pd.DataFrame: Long-format sector AUM and fund count per period.
+    """
+    query = """
         SELECT
             h.period,
             s.sector,
-            SUM(CASE WHEN h.value_usd > 0 AND (h.put_call IS NULL OR h.put_call = '') THEN 1 ELSE 0 END) AS equity_positions,
-            COUNT(DISTINCT CASE WHEN h.value_usd > 0 AND (h.put_call IS NULL OR h.put_call = '') THEN h.fund_id END) AS funds_holding_equity,
-            SUM(CASE WHEN h.value_usd > 0 AND (h.put_call IS NULL OR h.put_call = '') THEN h.value_usd ELSE 0 END) AS equity_aum_usd,
-            ROUND(
-                SUM(CASE WHEN h.value_usd > 0 AND (h.put_call IS NULL OR h.put_call = '') THEN h.value_usd ELSE 0 END) * 100.0
-                / pt.period_equity_aum,
-                2
-            ) AS pct_of_equity_aum,
-            SUM(CASE WHEN h.value_usd > 0 THEN h.value_usd ELSE 0 END) AS total_aum_with_options_usd,
-            ROUND(
-                SUM(CASE WHEN h.value_usd > 0 THEN h.value_usd ELSE 0 END) * 100.0
-                / pt.period_total_aum,
-                2
-            ) AS pct_of_total_aum
+            SUM(h.value_usd) AS value_usd,
+            COUNT(DISTINCT h.fund_id) AS fund_count
         FROM Fact_Holdings h
         JOIN Dim_Security s ON h.security_id = s.security_id
-        JOIN period_totals pt ON pt.period = h.period
         WHERE h.value_usd > 0
+          AND (h.put_call IS NULL OR h.put_call = '')
           AND (h.qoq_change_flag IS NULL OR h.qoq_change_flag != 'EXITED')
-        GROUP BY h.period, s.sector, pt.period_equity_aum, pt.period_total_aum
-        ORDER BY h.period ASC, equity_aum_usd DESC
+        GROUP BY h.period, s.sector
+        ORDER BY h.period ASC, value_usd DESC
     """
     with get_connection() as conn:
         return pd.read_sql_query(query, conn)
@@ -713,7 +753,7 @@ def get_sector_by_period() -> pd.DataFrame:
 
 def export_to_csv(df: pd.DataFrame, filename: str) -> None:
     """
-    Saves DataFrame to the output/ folder.
+    Saves DataFrame to the output/ folder (gitignored) and copies to dashboard/data/ (tracked in git).
     
     Args:
         df (pd.DataFrame): Data to export.
@@ -723,6 +763,13 @@ def export_to_csv(df: pd.DataFrame, filename: str) -> None:
     out_path = filename if os.path.dirname(filename) else os.path.join("output", filename)
     df.to_csv(out_path, index=False)
     logger.info("Exported %d rows to %s", len(df), out_path)
+
+    if not os.path.dirname(filename):
+        dashboard_dir = os.path.join("dashboard", "data")
+        os.makedirs(dashboard_dir, exist_ok=True)
+        dashboard_path = os.path.join(dashboard_dir, filename)
+        df.to_csv(dashboard_path, index=False)
+        logger.info("Copied %d rows to %s", len(df), dashboard_path)
 
 
 if __name__ == "__main__":

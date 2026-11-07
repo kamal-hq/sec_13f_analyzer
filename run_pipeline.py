@@ -10,6 +10,7 @@ from src.analysis import (
     get_aum_by_period,
     get_convergence_signals,
     get_etf_convergence_signals,
+    get_fund_aum,
     get_fund_concentration,
     get_fund_summary,
     get_new_to_sample_signals,
@@ -76,7 +77,7 @@ def run_pipeline() -> pd.DataFrame:
             count = conn.execute(f"SELECT COUNT(*) AS cnt FROM {table}").fetchone()["cnt"]
             logger.info("Table %s row count: %d", table, count)
 
-    logger.info("Step 4/4: Exporting Power BI CSVs to output/...")
+    logger.info("Step 4/4: Exporting Power BI CSVs to output/ and dashboard/data/...")
     export_to_csv(get_convergence_signals("2026-Q2", min_funds=4), "convergence_signals.csv")
     export_to_csv(
         get_convergence_signals("2026-Q2", fund_types=DISCRETIONARY_FUND_TYPES),
@@ -84,6 +85,7 @@ def run_pipeline() -> pd.DataFrame:
     )
     export_to_csv(get_new_to_sample_signals("2026-Q2", min_funds=3), "new_positions_signals.csv")
     export_to_csv(get_top_holdings_by_aum("2026-Q2", top_n=50), "top_holdings.csv")
+    export_to_csv(get_fund_aum(), "fund_aum.csv")
     export_to_csv(get_fund_summary(), "fund_summary.csv")
     export_to_csv(get_sector_by_period(), "sector_by_period.csv")
 

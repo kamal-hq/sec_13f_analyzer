@@ -1,0 +1,5 @@
+cusip,ticker,company_name,sector,is_new_listing,funds_buying,funds,total_dollars_added,fund_type_breakdown
+84615Q103,SPCX,SPACE EXPLORATION TECHNOLOGIES CORP,Technology,1,4,"Bridgewater Associates, Citadel Advisors, Temasek Holdings, Two Sigma Investments",2861656740,"Hedge Fund: 3, Sovereign Wealth Fund: 1"
+G9600F104,VGNT,VERSIGENT PLC,Consumer Discretionary,1,4,"CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",47816706,"Hedge Fund: 3, Public Pension Fund: 1"
+04339D105,ARXS,ARXIS INC,Industrials,1,3,"Citadel Advisors, Temasek Holdings, Two Sigma Investments",152128701,"Hedge Fund: 2, Sovereign Wealth Fund: 1"
+89472Y107,TGB,TREKOR METALS LTD,Materials,1,3,"Renaissance Technologies, Temasek Holdings, Two Sigma Investments",90094508,"Hedge Fund: 2, Sovereign Wealth Fund: 1"

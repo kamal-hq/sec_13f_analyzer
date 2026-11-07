@@ -1,0 +1,10 @@
+cusip,ticker,company_name,sector,is_new_listing,funds_buying,hedge_fund_buyers,discretionary_buyers,buyer_mix,funds,total_dollars_added,fund_type_breakdown
+02079K305/02079K107,GOOGL/GOOG,ALPHABET INC,Technology,0,2,0,2,Includes discretionary,"Berkshire Hathaway, Temasek Holdings",18665002497,"Conglomerate: 1, Sovereign Wealth Fund: 1"
+172967424,C,CITIGROUP INC,Financials,0,2,0,2,Includes discretionary,"CalPERS, Temasek Holdings",226493349,"Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+931142103,WMT,WALMART INC,Consumer Staples,0,2,0,2,Includes discretionary,"CalPERS, Temasek Holdings",224060786,"Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+007903107,AMD,ADVANCED MICRO DEVICES INC,Technology,0,2,0,2,Includes discretionary,"CalPERS, Temasek Holdings",204656336,"Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+219350105,GLW,CORNING INC,Materials,0,2,0,2,Includes discretionary,"CalPERS, Temasek Holdings",89434217,"Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+632307104,NTRA,NATERA INC,Healthcare,0,2,0,2,Includes discretionary,"CalPERS, Temasek Holdings",53204471,"Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+04965M106,ATAT,ATOUR LIFESTYLE HLDGS LTD,Consumer Discretionary,0,2,0,2,Includes discretionary,"CalPERS, Temasek Holdings",40828370,"Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+19247G107,COHR,COHERENT CORP,Technology,0,2,0,2,Includes discretionary,"CalPERS, Temasek Holdings",40785831,"Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+916896103,UEC,URANIUM ENERGY CORP,Materials,0,2,0,2,Includes discretionary,"CalPERS, Temasek Holdings",5946553,"Public Pension Fund: 1, Sovereign Wealth Fund: 1"

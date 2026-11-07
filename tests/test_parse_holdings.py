@@ -423,4 +423,46 @@ def test_split_cache_created_and_fallback_used_on_network_failure(monkeypatch, c
     assert "using cached split confirmation" in caplog.text.lower()
 
 
+def test_power_bi_helper_fields_and_dashboard_csvs() -> None:
+    """
+    Verifies Power BI helper fields in convergence_signals.csv (hedge_fund_buyers, discretionary_buyers, buyer_mix),
+    long-format fund_aum.csv, long-format sector_by_period.csv, and tracked copies in dashboard/data/.
+    """
+    conv_df = pd.read_csv(os.path.join("output", "convergence_signals.csv"))
+    for col in ("hedge_fund_buyers", "discretionary_buyers", "buyer_mix"):
+        assert col in conv_df.columns
+    assert (conv_df["hedge_fund_buyers"] + conv_df["discretionary_buyers"] == conv_df["funds_buying"]).all()
+    for _, row in conv_df.iterrows():
+        expected_mix = "Hedge-fund-only" if int(row["discretionary_buyers"]) == 0 else "Includes discretionary"
+        assert row["buyer_mix"] == expected_mix
+
+    assert int((conv_df["buyer_mix"] == "Hedge-fund-only").sum()) == 31
+    assert int((conv_df["buyer_mix"] == "Includes discretionary").sum()) == 25
+
+    fund_aum_df = pd.read_csv(os.path.join("output", "fund_aum.csv"))
+    assert list(fund_aum_df.columns) == ["period", "fund", "fund_type", "aum_with_options", "aum_equity_only"]
+    assert len(fund_aum_df) == 14
+
+    sector_df = pd.read_csv(os.path.join("output", "sector_by_period.csv"))
+    assert list(sector_df.columns) == ["period", "sector", "value_usd", "fund_count"]
+    assert len(sector_df) == 24
+
+    expected_csvs = [
+        "convergence_signals.csv",
+        "discretionary_signals.csv",
+        "new_positions_signals.csv",
+        "top_holdings.csv",
+        "fund_aum.csv",
+        "fund_summary.csv",
+        "sector_by_period.csv",
+    ]
+    for fname in expected_csvs:
+        out_file = os.path.join("output", fname)
+        dash_file = os.path.join("dashboard", "data", fname)
+        assert os.path.exists(out_file), f"Missing {out_file}"
+        assert os.path.exists(dash_file), f"Missing {dash_file}"
+        pd.testing.assert_frame_equal(pd.read_csv(out_file), pd.read_csv(dash_file))
+
+
+
 

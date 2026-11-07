@@ -41,14 +41,16 @@ The system follows a 5-layer pipeline: Source → Fetch → Parse → Store → 
    python -m pytest -v
    ```
 
-### Exported Power BI & Research Outputs (`output/`)
-- `output/convergence_signals.csv` — Full-universe seasoned common-equity convergence (`4+` of `7` funds buying)
-- `output/discretionary_signals.csv` — Discretionary long-horizon convergence (`2+` of `3` discretionary funds buying)
-- `output/new_positions_signals.csv` — New to the sample (no prior-quarter holders) (`is_new_listing = 1`, `3+` funds buying)
-- `output/top_holdings.csv` — Top 50 common-equity holdings by aggregate institutional AUM (`2026-Q2`)
-- `output/fund_summary.csv` — Per-fund, per-period AUM (with and without options), position counts, and Top-10 concentration
-- `output/sector_by_period.csv` — Institutional common-equity AUM and QoQ dollar rotation by sector (`2026-Q1` vs `2026-Q2`)
-- `output/data_dictionary.md` — Column-by-column schema and business logic reference for all 6 CSVs
+### Exported Power BI & Research Outputs (`output/` & `dashboard/data/`)
+All CSV outputs are generated in `output/` (gitignored) and automatically copied into `dashboard/data/` (tracked in Git for the Power BI dashboard in `dashboard/`):
+- `output/convergence_signals.csv` (`dashboard/data/convergence_signals.csv`) — Full-universe seasoned common-equity convergence (`4+` of `7` funds buying), including `hedge_fund_buyers`, `discretionary_buyers`, and `buyer_mix`
+- `output/discretionary_signals.csv` (`dashboard/data/discretionary_signals.csv`) — Discretionary long-horizon convergence (`2+` of `3` discretionary funds buying)
+- `output/new_positions_signals.csv` (`dashboard/data/new_positions_signals.csv`) — New to the sample (no prior-quarter holders) (`is_new_listing = 1`, `3+` funds buying)
+- `output/top_holdings.csv` (`dashboard/data/top_holdings.csv`) — Top 50 common-equity holdings by aggregate institutional AUM (`2026-Q2`)
+- `output/fund_aum.csv` (`dashboard/data/fund_aum.csv`) — Long-format per-fund AUM across periods (`period`, `fund`, `fund_type`, `aum_with_options`, `aum_equity_only`)
+- `output/fund_summary.csv` (`dashboard/data/fund_summary.csv`) — Per-fund, per-period AUM (with and without options), position counts, and Top-10 concentration
+- `output/sector_by_period.csv` (`dashboard/data/sector_by_period.csv`) — Long-format institutional common-equity AUM by sector (`period`, `sector`, `value_usd`, `fund_count`)
+- `output/data_dictionary.md` — Column-by-column schema and business logic reference for all 7 CSVs
 - `output/research_note.md` — Full quantitative research note with query-backed tables and raw XML audit trails
 
 ## Database Schema

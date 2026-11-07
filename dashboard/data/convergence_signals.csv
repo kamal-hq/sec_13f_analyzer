@@ -1,0 +1,57 @@
+cusip,ticker,company_name,sector,is_new_listing,funds_buying,hedge_fund_buyers,discretionary_buyers,buyer_mix,funds,total_dollars_added,fund_type_breakdown
+007903107,AMD,ADVANCED MICRO DEVICES INC,Technology,0,5,3,2,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Temasek Holdings, Two Sigma Investments",1195133634,"Hedge Fund: 3, Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+949746101,WFC,WELLS FARGO & CO,Financials,0,5,4,1,Includes discretionary,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Temasek Holdings, Two Sigma Investments",903048556,"Hedge Fund: 4, Sovereign Wealth Fund: 1"
+12504L109,CBRE,CBRE GROUP INC,Real Estate,0,5,4,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",268148933,"Hedge Fund: 4, Public Pension Fund: 1"
+346375108,FORM,FORMFACTOR INC,Technology,0,5,4,1,Includes discretionary,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Temasek Holdings, Two Sigma Investments",119590856,"Hedge Fund: 4, Sovereign Wealth Fund: 1"
+G7997R103,STX,SEAGATE TECHNOLOGY HLDNGS PL,Technology,0,4,3,1,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",1333294180,"Hedge Fund: 3, Public Pension Fund: 1"
+64110L106,NFLX,NETFLIX INC.,Communication Services,0,4,3,1,Includes discretionary,"Citadel Advisors, Renaissance Technologies, Temasek Holdings, Two Sigma Investments",1058109711,"Hedge Fund: 3, Sovereign Wealth Fund: 1"
+G5960L103,MDT,MEDTRONIC PLC,Healthcare,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",815269329,Hedge Fund: 4
+09290D101,BLK,BLACKROCK INC,Financials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",778654630,Hedge Fund: 4
+931142103,WMT,WALMART INC,Consumer Staples,0,4,2,2,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Temasek Holdings",755714705,"Hedge Fund: 2, Public Pension Fund: 1, Sovereign Wealth Fund: 1"
+45866F104,ICE,INTERCONTINENTAL EXCHANGE IN,Financials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",572770629,Hedge Fund: 4
+78409V104,SPGI,S&P GLOBAL INC,Financials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",562871603,Hedge Fund: 4
+169656105,CMG,CHIPOTLE MEXICAN GRILL INC,Consumer Discretionary,0,4,3,1,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",558661072,"Hedge Fund: 3, Public Pension Fund: 1"
+609839105,MPWR,MONOLITHIC PWR SYS INC,Technology,0,4,3,1,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",491800836,"Hedge Fund: 3, Public Pension Fund: 1"
+260557103,DOW,DOW HLDGS INC,Materials,0,4,3,1,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",491407926,"Hedge Fund: 3, Public Pension Fund: 1"
+780259305,SHEL,SHELL PLC,Energy,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",449353955,Hedge Fund: 4
+14040H105,COF,CAPITAL ONE FINANCIAL CORP,Financials,0,4,3,1,Includes discretionary,"Bridgewater Associates, Citadel Advisors, Temasek Holdings, Two Sigma Investments",422386551,"Hedge Fund: 3, Sovereign Wealth Fund: 1"
+75513E101,RTX,RTX CORPORATION,Industrials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",415591233,Hedge Fund: 4
+69331C108,PCG,PG&E CORP,Utilities,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",343491278,Hedge Fund: 4
+494368103,KMB,KIMBERLY-CLARK CORP,Consumer Staples,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",301310527,Hedge Fund: 4
+98978V103,ZTS,ZOETIS INC,Healthcare,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",299379108,Hedge Fund: 4
+G1151C101,ACN,ACCENTURE PLC IRELAND,Technology,0,4,3,1,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",286649531,"Hedge Fund: 3, Public Pension Fund: 1"
+406216101,HAL,HALLIBURTON CO,Energy,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",272698079,Hedge Fund: 4
+682189105,ON,ON SEMICONDUCTOR CORP,Technology,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Renaissance Technologies",262044271,"Hedge Fund: 3, Public Pension Fund: 1"
+925550105,VIAV,VIAVI SOLUTIONS INC,Technology,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",252134851,Hedge Fund: 4
+65473P105,NI,NISOURCE INC,Utilities,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",241556045,Hedge Fund: 4
+595017104,MCHP,MICROCHIP TECHNOLOGY INC.,Technology,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",240177023,Hedge Fund: 4
+867224107,SU,SUNCOR ENERGY INC NEW,Energy,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",231653687,Hedge Fund: 4
+366651107,IT,GARTNER INC,Technology,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",228842943,Hedge Fund: 4
+008474108,AEM,AGNICO EAGLE MINES LTD,Materials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",215272349,Hedge Fund: 4
+71654V408/71654V101,PBR,PETROLEO BRASILEIRO S A,Unknown,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",213590608,Hedge Fund: 4
+10806X102,BBIO,BRIDGEBIO PHARMA INC,Healthcare,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",213563952,Hedge Fund: 4
+75524B104,RBC,RBC BEARINGS INC,Industrials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",201673220,Hedge Fund: 4
+687793109,OSCR,OSCAR HEALTH INC,Healthcare,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",169624354,Hedge Fund: 4
+209115104,ED,CONSOLIDATED EDISON INC,Utilities,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",165998213,Hedge Fund: 4
+N53745100,LYB,LYONDELLBASELL INDUSTRIES NV,Materials,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Two Sigma Investments",148338057,"Hedge Fund: 3, Public Pension Fund: 1"
+444859102,HUM,HUMANA INC,Healthcare,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Renaissance Technologies",141423031,"Hedge Fund: 3, Public Pension Fund: 1"
+751212101,RL,RALPH LAUREN CORP,Consumer Discretionary,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",135017465,Hedge Fund: 4
+49177J102,KVUE,KENVUE INC,Consumer Staples,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",122252327,Hedge Fund: 4
+33829M101,FIVE,FIVE BELOW INC,Consumer Discretionary,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Renaissance Technologies, Two Sigma Investments",110731582,"Hedge Fund: 3, Public Pension Fund: 1"
+801056102,SANM,SANMINA CORP,Technology,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Renaissance Technologies",105134241,"Hedge Fund: 3, Public Pension Fund: 1"
+550021109,LULU,LULULEMON ATHLETICA INC,Consumer Discretionary,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Renaissance Technologies",104240288,"Hedge Fund: 3, Public Pension Fund: 1"
+G0692U109,AXS,AXIS CAP HLDGS LTD,Financials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",97567553,Hedge Fund: 4
+171484108,CHDN,CHURCHILL DOWNS INC,Consumer Discretionary,0,4,3,1,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",85019955,"Hedge Fund: 3, Public Pension Fund: 1"
+21874C102,CNM,CORE & MAIN INC,Industrials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",76043835,Hedge Fund: 4
+38059T106,GFI,GOLD FIELDS LTD,Materials,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",68599514,Hedge Fund: 4
+147528103,CASY,CASEYS GEN STORES INC,Consumer Staples,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",67371168,Hedge Fund: 4
+67000B104,NOVT,NOVANTA INC,Technology,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Two Sigma Investments",64182631,"Hedge Fund: 3, Public Pension Fund: 1"
+320517105,FHN,FIRST HORIZON CORPORATION,Financials,0,4,3,1,Includes discretionary,"Citadel Advisors, Renaissance Technologies, Temasek Holdings, Two Sigma Investments",58750855,"Hedge Fund: 3, Sovereign Wealth Fund: 1"
+457187102,INGR,INGREDION INC,Consumer Staples,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",53950794,Hedge Fund: 4
+146229109,CRI,CARTERS INC,Consumer Discretionary,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",46333277,Hedge Fund: 4
+577933104,MMS,MAXIMUS INC,Industrials,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Two Sigma Investments",39471237,"Hedge Fund: 3, Public Pension Fund: 1"
+294429105,EFX,EQUIFAX INC,Financials,0,4,3,1,Includes discretionary,"CalPERS, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",39051627,"Hedge Fund: 3, Public Pension Fund: 1"
+09263B207,BKSY,BLACKSKY TECHNOLOGY INC,Technology,0,4,3,1,Includes discretionary,"Citadel Advisors, Renaissance Technologies, Temasek Holdings, Two Sigma Investments",32081113,"Hedge Fund: 3, Sovereign Wealth Fund: 1"
+902681105,UGI,UGI CORP NEW,Utilities,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",26556701,Hedge Fund: 4
+058498106,BALL,BALL CORP,Materials,0,4,3,1,Includes discretionary,"Bridgewater Associates, CalPERS, Citadel Advisors, Renaissance Technologies",15176055,"Hedge Fund: 3, Public Pension Fund: 1"
+371901109,GNTX,GENTEX CORP,Consumer Discretionary,0,4,4,0,Hedge-fund-only,"Bridgewater Associates, Citadel Advisors, Renaissance Technologies, Two Sigma Investments",10677687,Hedge Fund: 4
