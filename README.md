@@ -2,6 +2,9 @@
 
 **Tracking institutional consensus buying signals from SEC 13F filings**
 
+![Who is buying](dashboard/screenshots/02_who_is_buying.png)
+*Who is buying: 31 of 56 broad signals have hedge-fund buyers only; 9 stocks drew 2+ discretionary buyers. Berkshire and Temasek added about $18.7B of Alphabet.*
+
 ## Project Overview
 
 The Smart Money Convergence thesis aims to find stocks that 3 or more major institutions independently initiated or increased positions in during the same quarter. By analyzing SEC 13F filings from top-tier institutional investors, this project identifies consensus buying signals that may indicate high-conviction institutional accumulation.
@@ -110,6 +113,19 @@ All figures below come directly from SQL queries executed against `data/sec_13f.
      ```sql
      -- See Query 4 (Top Holdings by Total Institutional AUM) and Query 5 (Fund Concentration) in sql/queries.sql
      ```
+
+## Dashboard
+
+The interactive Power BI report ([`dashboard/sec_13f_dashboard.pbix`](dashboard/sec_13f_dashboard.pbix)) and static PDF export ([`dashboard/sec_13f_dashboard.pdf`](dashboard/sec_13f_dashboard.pdf)) visualize the 2026-Q1 vs. 2026-Q2 findings. All underlying CSV tables read by the dashboard are stored in [`dashboard/data/`](dashboard/data/).
+
+![Convergence overview](dashboard/screenshots/01_convergence_overview.png)
+*Convergence overview: 56 stocks where 4+ of 7 institutions increased their position in 2026-Q2 (split-adjusted, ETFs excluded).*
+
+![Who is buying](dashboard/screenshots/02_who_is_buying.png)
+*Who is buying: 31 of 56 broad signals have hedge-fund buyers only; 9 stocks drew 2+ discretionary buyers. Berkshire and Temasek added about $18.7B of Alphabet.*
+
+![Funds and sectors](dashboard/screenshots/03_funds_and_sectors.png)
+*Funds and sectors: sector value Q1 vs Q2 and fund AUM (options are 43.5% of Q2 AUM).*
 
 ## Limitations
 
