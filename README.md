@@ -58,6 +58,8 @@ All CSV outputs are generated in `output/` (gitignored) and automatically copied
 
 ### Use as a library
 
+> **Note:** Import only from the `sec_13f_analyzer` namespace (do not import from top-level `src` or `config` in external projects).
+
 Install editable locally or directly from Git:
 
 ```bash
