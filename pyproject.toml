@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sec_13f_analyzer"
+version = "1.1.0"
+description = "Tracking institutional consensus buying signals from SEC 13F filings"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "requests",
+    "pandas",
+    "lxml",
+    "python-dotenv",
+    "yfinance",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools]
+packages = ["sec_13f_analyzer", "src"]
+py-modules = ["config", "run_pipeline"]

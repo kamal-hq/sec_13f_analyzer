@@ -464,5 +464,121 @@ def test_power_bi_helper_fields_and_dashboard_csvs() -> None:
         pd.testing.assert_frame_equal(pd.read_csv(out_file), pd.read_csv(dash_file))
 
 
+def test_library_imports_and_custom_path_config_injection(tmp_path, monkeypatch) -> None:
+    """
+    Verifies that sec_13f_analyzer is importable as a package and supports injecting
+    custom data_dir, db_path, cache paths, output_dir, and SEC User-Agent without
+    touching the default repository files.
+    """
+    import shutil
+    import sec_13f_analyzer
+    from sec_13f_analyzer import (
+        bulk_insert_holdings,
+        configure,
+        create_schema,
+        export_to_csv,
+        get_aum_by_period,
+        get_convergence_signals,
+        get_fund_aum,
+        make_request,
+        map_cusips,
+        map_sectors,
+        parse_all_raw_files,
+    )
+
+    assert sec_13f_analyzer.__version__ == "1.1.0"
+
+    # 1. Verify custom User-Agent injection into SEC requests
+    captured_headers: dict[str, str] = {}
+
+    class _DummyResponse:
+        headers = {"Content-Type": "application/json"}
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"ok": True}
+
+    def _fake_get(url: str, headers: dict, timeout: int):
+        captured_headers.update(headers)
+        return _DummyResponse()
+
+    monkeypatch.setattr("src.fetch_13f._SESSION.get", _fake_get)
+    monkeypatch.setattr("src.fetch_13f.time.sleep", lambda _s: None)
+    resp = make_request("https://data.sec.gov/submissions/CIK0001067983.json", user_agent="CustomApp custom@test.org")
+    assert resp == {"ok": True}
+    assert captured_headers["User-Agent"] == "CustomApp custom@test.org"
+
+    # 2. Verify isolated raw_dir, cache_path, db_path, and output_dir injection
+    custom_data_dir = tmp_path / "custom_data"
+    custom_raw_dir = custom_data_dir / "raw"
+    custom_mappings_dir = custom_data_dir / "mappings"
+    custom_output_dir = tmp_path / "custom_output"
+    custom_db_path = tmp_path / "isolated_13f.db"
+    custom_raw_dir.mkdir(parents=True)
+    custom_mappings_dir.mkdir(parents=True)
+
+    # Copy Berkshire Q1 & Q2 XMLs into isolated raw_dir
+    shutil.copy2(BERKSHIRE_Q1, custom_raw_dir / os.path.basename(BERKSHIRE_Q1))
+    shutil.copy2(BERKSHIRE_Q2, custom_raw_dir / os.path.basename(BERKSHIRE_Q2))
+
+    parsed_df = parse_all_raw_files(raw_dir=str(custom_raw_dir))
+    assert len(parsed_df) == 58
+
+    # Inject a custom CUSIP and sector cache in tmp_path
+    custom_cusip_cache = custom_mappings_dir / "cusip_cache.json"
+    custom_sector_cache = custom_mappings_dir / "sector_cache.json"
+    shutil.copy2(os.path.join("data", "mappings", "cusip_cache.json"), custom_cusip_cache)
+    shutil.copy2(os.path.join("data", "mappings", "sector_cache.json"), custom_sector_cache)
+
+    cusip_map = map_cusips(parsed_df["cusip"].unique().tolist(), cache_path=str(custom_cusip_cache))
+    parsed_df["ticker"] = parsed_df["cusip"].map(lambda c: cusip_map.get(c, {}).get("ticker"))
+    parsed_df["company_name"] = parsed_df["issuer_name"]
+    parsed_df["security_class"] = parsed_df["title_of_class"]
+    sector_map = map_sectors(
+        parsed_df["ticker"].dropna().unique().tolist(),
+        cache_path=str(custom_sector_cache),
+        user_agent="CustomApp custom@test.org",
+    )
+    parsed_df["sector"] = parsed_df["ticker"].map(lambda t: sector_map.get(str(t).upper(), "Unknown"))
+
+    create_schema(db_path=str(custom_db_path))
+    bulk_insert_holdings(
+        parsed_df,
+        db_path=str(custom_db_path),
+        split_cache_path=str(custom_mappings_dir / "split_cache.json"),
+    )
+    assert custom_db_path.exists()
+
+    aum_df = get_aum_by_period(db_path=str(custom_db_path))
+    assert len(aum_df) == 2
+    assert int(aum_df.loc[aum_df["period"] == "2026-Q2", "aum_with_options_usd"].iloc[0]) == 299_253_556_246
+
+    conv_df = get_convergence_signals("2026-Q2", min_funds=1, db_path=str(custom_db_path))
+    assert "GOOGL/GOOG" in conv_df["ticker"].values
+
+    fund_aum_df = get_fund_aum(db_path=str(custom_db_path))
+    export_to_csv(fund_aum_df, "fund_aum.csv", output_dir=str(custom_output_dir))
+    assert (custom_output_dir / "fund_aum.csv").exists()
+
+    # 3. Verify runtime configure() helper and restore defaults
+    orig_data_dir = sec_13f_analyzer.config.DATA_DIR
+    orig_db_path = sec_13f_analyzer.config.DB_PATH
+    orig_ua = sec_13f_analyzer.config.SEC_USER_AGENT
+    try:
+        configure(
+            data_dir=str(custom_data_dir),
+            db_path=str(custom_db_path),
+            user_agent="ConfiguredAgent agent@test.org",
+        )
+        assert sec_13f_analyzer.config.DB_PATH == str(custom_db_path)
+        assert sec_13f_analyzer.config.SEC_USER_AGENT == "ConfiguredAgent agent@test.org"
+        assert len(get_fund_aum()) == 2
+    finally:
+        configure(data_dir=orig_data_dir, db_path=orig_db_path, user_agent=orig_ua)
+
+
+
 
 

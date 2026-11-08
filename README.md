@@ -56,6 +56,46 @@ All CSV outputs are generated in `output/` (gitignored) and automatically copied
 - `output/data_dictionary.md` — Column-by-column schema and business logic reference for all 7 CSVs
 - `output/research_note.md` — Full quantitative research note with query-backed tables and raw XML audit trails
 
+### Use as a library
+
+Install editable locally or directly from Git:
+
+```bash
+pip install -e .
+# or: pip install git+https://github.com/kamal-hq/sec_13f_analyzer.git
+```
+
+Import functions directly from `sec_13f_analyzer` and pass your own `data_dir`, `db_path`, cache paths, and SEC `user_agent`:
+
+```python
+from sec_13f_analyzer import (
+    bulk_insert_holdings,
+    configure,
+    get_convergence_signals,
+    map_cusips,
+    map_sectors,
+    parse_all_raw_files,
+    run_pipeline,
+)
+
+# Option 1: Run the full pipeline with custom directories and SEC User-Agent
+df = run_pipeline(
+    data_dir="/path/to/data",
+    db_path="/path/to/custom_13f.db",
+    output_dir="/path/to/output",
+    user_agent="MyApp my.email@example.com",
+)
+
+# Option 2: Call individual stages with explicit paths or runtime configure()
+configure(
+    data_dir="/path/to/data",
+    db_path="/path/to/custom_13f.db",
+    user_agent="MyApp my.email@example.com",
+)
+holdings_df = parse_all_raw_files(raw_dir="/path/to/data/raw")
+signals_df = get_convergence_signals("2026-Q2", min_funds=4, db_path="/path/to/custom_13f.db")
+```
+
 ## Database Schema
 
 - **Dim_Fund**: `fund_id`, `cik`, `name`, `fund_type`

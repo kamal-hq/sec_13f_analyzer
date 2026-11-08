@@ -7,6 +7,7 @@ import logging
 import os
 import sqlite3
 import pandas as pd
+import config
 from config import COMMON_SPLIT_FACTORS, DB_PATH, FUND_TYPES, SPLIT_OVERRIDES, TARGET_FUNDS
 
 logger = logging.getLogger(__name__)
@@ -15,23 +16,27 @@ CIK_TO_FUND_NAME: dict[str, str] = {cik: name for name, cik in TARGET_FUNDS.item
 SPLIT_CACHE_PATH = os.path.join("data", "mappings", "split_cache.json")
 
 
-def get_connection() -> sqlite3.Connection:
+def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     """
-    Returns a SQLite connection to DB_PATH with row_factory set to sqlite3.Row.
+    Returns a SQLite connection to db_path (or config.DB_PATH) with row_factory set to sqlite3.Row.
     
+    Args:
+        db_path (str | None): Optional SQLite database file path override.
+        
     Returns:
         sqlite3.Connection: Database connection object.
     """
-    db_dir = os.path.dirname(DB_PATH)
+    resolved_db_path = db_path or config.DB_PATH
+    db_dir = os.path.dirname(resolved_db_path)
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(resolved_db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 
-def create_schema() -> None:
+def create_schema(db_path: str | None = None) -> None:
     """
     Creates all three tables (Dim_Fund, Dim_Security, Fact_Holdings) and View_Exited_Positions if they do not exist.
     
@@ -66,7 +71,7 @@ def create_schema() -> None:
     );
     ```
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS Dim_Fund (
@@ -126,7 +131,7 @@ def create_schema() -> None:
         fact_cols = [r["name"] for r in conn.execute("PRAGMA table_info(Fact_Holdings)").fetchall()]
         if "is_new_listing" not in fact_cols:
             conn.execute("ALTER TABLE Fact_Holdings ADD COLUMN is_new_listing INTEGER")
-    logger.info("Star schema verified at %s", DB_PATH)
+    logger.info("Star schema verified at %s", db_path or config.DB_PATH)
 
 
 def insert_fund(
@@ -134,6 +139,7 @@ def insert_fund(
     name: str,
     fund_type: str = "Institutional Investment Manager",
     _conn: sqlite3.Connection | None = None,
+    db_path: str | None = None,
 ) -> int:
     """
     Inserts or ignores a fund record.
@@ -147,7 +153,7 @@ def insert_fund(
         int: The fund_id of the inserted or existing record.
     """
     own_conn = _conn is None
-    conn = _conn if _conn is not None else get_connection()
+    conn = _conn if _conn is not None else get_connection(db_path=db_path)
     try:
         conn.execute(
             "INSERT OR IGNORE INTO Dim_Fund (cik, name, fund_type) VALUES (?, ?, ?)",
@@ -173,6 +179,7 @@ def insert_security(
     sector: str | None,
     security_class: str | None = None,
     _conn: sqlite3.Connection | None = None,
+    db_path: str | None = None,
 ) -> int:
     """
     Inserts or updates a security record with its security_class (titleOfClass) and SIC-mapped sector.
@@ -188,7 +195,7 @@ def insert_security(
         int: The security_id of the inserted or existing record.
     """
     own_conn = _conn is None
-    conn = _conn if _conn is not None else get_connection()
+    conn = _conn if _conn is not None else get_connection(db_path=db_path)
     try:
         conn.execute(
             """
@@ -228,6 +235,7 @@ def insert_holding(
     put_call: str | None = None,
     is_new_listing: int | None = None,
     _conn: sqlite3.Connection | None = None,
+    db_path: str | None = None,
 ) -> None:
     """
     Inserts a single holding record into Fact_Holdings.
@@ -244,7 +252,7 @@ def insert_holding(
         is_new_listing (int | None): 1 if no fund held the security in the prior period, 0 otherwise, None for earliest period.
     """
     own_conn = _conn is None
-    conn = _conn if _conn is not None else get_connection()
+    conn = _conn if _conn is not None else get_connection(db_path=db_path)
     try:
         conn.execute(
             """
@@ -271,25 +279,33 @@ def insert_holding(
             conn.close()
 
 
-def _load_split_cache() -> dict[str, dict]:
+def _load_split_cache(split_cache_path: str | None = None) -> dict[str, dict]:
     """Loads cached yfinance split confirmations from data/mappings/split_cache.json."""
-    if os.path.exists(SPLIT_CACHE_PATH):
+    resolved_path = split_cache_path or os.path.join(config.DATA_DIR, "mappings", "split_cache.json")
+    if os.path.exists(resolved_path):
         try:
-            with open(SPLIT_CACHE_PATH, "r", encoding="utf-8") as f:
+            with open(resolved_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as exc:
-            logger.warning("Failed to read split cache %s: %s", SPLIT_CACHE_PATH, exc)
+            logger.warning("Failed to read split cache %s: %s", resolved_path, exc)
     return {}
 
 
-def _save_split_cache(cache: dict[str, dict]) -> None:
+def _save_split_cache(cache: dict[str, dict], split_cache_path: str | None = None) -> None:
     """Persists yfinance split confirmations to data/mappings/split_cache.json."""
-    os.makedirs(os.path.dirname(SPLIT_CACHE_PATH), exist_ok=True)
-    with open(SPLIT_CACHE_PATH, "w", encoding="utf-8") as f:
+    resolved_path = split_cache_path or os.path.join(config.DATA_DIR, "mappings", "split_cache.json")
+    cache_dir = os.path.dirname(resolved_path)
+    if cache_dir:
+        os.makedirs(cache_dir, exist_ok=True)
+    with open(resolved_path, "w", encoding="utf-8") as f:
         json.dump(cache, f, indent=2, sort_keys=True)
 
 
-def _confirm_split_with_yfinance(ticker: str | None, expected_factor: float) -> tuple[str, str | None]:
+def _confirm_split_with_yfinance(
+    ticker: str | None,
+    expected_factor: float,
+    split_cache_path: str | None = None,
+) -> tuple[str, str | None]:
     """
     Checks yfinance split history for `ticker` between 2026-Q1 and 2026-Q2 period-ends
     (2026-03-25 through 2026-07-05) to confirm an auto-detected stock split.
@@ -301,7 +317,8 @@ def _confirm_split_with_yfinance(ticker: str | None, expected_factor: float) -> 
         return "UNCONFIRMED", None
 
     clean_ticker = str(ticker).strip().upper()
-    cache = _load_split_cache()
+    resolved_cache_path = split_cache_path or os.path.join(config.DATA_DIR, "mappings", "split_cache.json")
+    cache = _load_split_cache(split_cache_path=resolved_cache_path)
 
     try:
         import yfinance as yf
@@ -313,7 +330,7 @@ def _confirm_split_with_yfinance(ticker: str | None, expected_factor: float) -> 
             logger.info(
                 "Using cached split confirmation for %s from %s (%s on %s)",
                 clean_ticker,
-                SPLIT_CACHE_PATH,
+                resolved_cache_path,
                 entry.get("confirmation_status"),
                 entry.get("split_date"),
             )
@@ -336,7 +353,7 @@ def _confirm_split_with_yfinance(ticker: str | None, expected_factor: float) -> 
             "expected_factor": float(expected_factor),
             "split_date": split_date,
         }
-        _save_split_cache(cache)
+        _save_split_cache(cache, split_cache_path=resolved_cache_path)
         return status, split_date
     except Exception as exc:
         if clean_ticker in cache:
@@ -345,7 +362,7 @@ def _confirm_split_with_yfinance(ticker: str | None, expected_factor: float) -> 
                 "yfinance network call failed for %s (%s); using cached split confirmation from %s (%s)",
                 clean_ticker,
                 exc,
-                SPLIT_CACHE_PATH,
+                resolved_cache_path,
                 entry.get("confirmation_status"),
             )
             return str(entry.get("confirmation_status", "UNCONFIRMED")), entry.get("split_date")
@@ -353,7 +370,7 @@ def _confirm_split_with_yfinance(ticker: str | None, expected_factor: float) -> 
         return "UNCONFIRMED", None
 
 
-def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
+def detect_splits(df: pd.DataFrame, split_cache_path: str | None = None) -> pd.DataFrame:
     """
     Detects stock splits (forward and reverse) between the prior period and current period.
     For each CUSIP, computes implied price per share (value/shares) per period using the median
@@ -456,7 +473,7 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
         for f in COMMON_SPLIT_FACTORS:
             # Forward split: Q1/Q2 price ratio within 5% of f, and median shares move inversely (~f)
             if abs(pr - f) / f <= 0.05 and sr > 1.0 and abs(sr - f) / f <= 0.30 and abs(msr - f) / f <= 0.25:
-                status, s_date = _confirm_split_with_yfinance(ticker, float(f))
+                status, s_date = _confirm_split_with_yfinance(ticker, float(f), split_cache_path=split_cache_path)
                 detected_rows.append(
                     {
                         "cusip": cusip,
@@ -482,7 +499,7 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
             inv_sr = 1.0 / sr if sr > 0 else 0.0
             inv_msr = 1.0 / msr if msr > 0 else 0.0
             if abs(inv_pr - f) / f <= 0.05 and sr < 1.0 and abs(inv_sr - f) / f <= 0.30 and abs(inv_msr - f) / f <= 0.25:
-                status, s_date = _confirm_split_with_yfinance(ticker, 1.0 / float(f))
+                status, s_date = _confirm_split_with_yfinance(ticker, 1.0 / float(f), split_cache_path=split_cache_path)
                 detected_rows.append(
                     {
                         "cusip": cusip,
@@ -512,7 +529,11 @@ def detect_splits(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def apply_split_adjustments(df: pd.DataFrame, splits_df: pd.DataFrame | None = None) -> pd.DataFrame:
+def apply_split_adjustments(
+    df: pd.DataFrame,
+    splits_df: pd.DataFrame | None = None,
+    split_cache_path: str | None = None,
+) -> pd.DataFrame:
     """
     Adjusts prior-period (Q1) share counts ONLY for confirmed splits (SPLIT_OVERRIDES plus
     auto-detected splits confirmed against yfinance split history). Unconfirmed auto-detected
@@ -520,7 +541,7 @@ def apply_split_adjustments(df: pd.DataFrame, splits_df: pd.DataFrame | None = N
     """
     work = df.copy()
     if splits_df is None:
-        splits_df = detect_splits(work)
+        splits_df = detect_splits(work, split_cache_path=split_cache_path)
     if splits_df.empty:
         return work
 
@@ -563,7 +584,10 @@ def apply_split_adjustments(df: pd.DataFrame, splits_df: pd.DataFrame | None = N
     return work
 
 
-def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
+def _compute_portfolio_and_qoq_metrics(
+    df: pd.DataFrame,
+    split_cache_path: str | None = None,
+) -> pd.DataFrame:
     """
     Applies confirmed stock-split adjustments to prior-period shares, then computes pct_of_portfolio
     per (fund_cik, period), qoq_change_flag (NULL for earliest period; NEW, INCREASED,
@@ -580,7 +604,7 @@ def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Adjust Q1 shares for confirmed stock splits before computing QoQ share changes and qoq_change_flag
-    work = apply_split_adjustments(work)
+    work = apply_split_adjustments(work, split_cache_path=split_cache_path)
 
     # Identify CUSIPs held by ANY fund in each period so we can flag is_new_listing
     all_periods = sorted(work["period"].unique())
@@ -660,22 +684,28 @@ def _compute_portfolio_and_qoq_metrics(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(result_frames, ignore_index=True)
 
 
-def bulk_insert_holdings(df: pd.DataFrame) -> None:
+def bulk_insert_holdings(
+    df: pd.DataFrame,
+    db_path: str | None = None,
+    split_cache_path: str | None = None,
+) -> None:
     """
     Takes the parsed and mapped DataFrame and runs the full insert pipeline
     calling the individual insert functions for funds, securities, and holdings.
     
     Args:
         df (pd.DataFrame): The transformed DataFrame ready for insertion.
+        db_path (str | None): Optional SQLite database path override.
+        split_cache_path (str | None): Optional split_cache.json path override.
     """
     if df.empty:
         logger.warning("bulk_insert_holdings received an empty DataFrame; nothing to insert.")
         return
 
-    create_schema()
-    enriched_df = _compute_portfolio_and_qoq_metrics(df)
+    create_schema(db_path=db_path)
+    enriched_df = _compute_portfolio_and_qoq_metrics(df, split_cache_path=split_cache_path)
 
-    conn = get_connection()
+    conn = get_connection(db_path=db_path)
     try:
         with conn:
             # 1. Insert funds and cache fund_id by cik

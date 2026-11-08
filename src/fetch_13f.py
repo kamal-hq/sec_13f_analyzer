@@ -29,20 +29,21 @@ COVER_NS = {"n": "http://www.sec.gov/edgar/thirteenffiler"}
 METADATA_CACHE_PATH = os.path.join("data", "mappings", "filing_metadata.json")
 
 
-def make_request(url: str) -> dict[str, Any]:
+def make_request(url: str, user_agent: str | None = None) -> dict[str, Any]:
     """
     Handles a single SEC API request with proper User-Agent header, rate limiting delay, and error handling.
     This is the only function that should make HTTP calls.
     
     Args:
         url (str): The URL to request.
+        user_agent (str | None): Optional SEC User-Agent header override.
         
     Returns:
         dict: The JSON response parsed into a dictionary (or {"text": ...} for XML/text responses).
     """
-    # SEC requires a descriptive User-Agent header from .env and enforces <=10 requests/second
-    user_agent = os.getenv("SEC_USER_AGENT", SEC_USER_AGENT)
-    headers = {"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"}
+    # SEC requires a descriptive User-Agent header and enforces <=10 requests/second
+    resolved_ua = user_agent or os.getenv("SEC_USER_AGENT", config.SEC_USER_AGENT)
+    headers = {"User-Agent": resolved_ua, "Accept-Encoding": "gzip, deflate"}
     time.sleep(RATE_LIMIT_DELAY)
     try:
         response = _SESSION.get(url, headers=headers, timeout=30)
@@ -56,7 +57,11 @@ def make_request(url: str) -> dict[str, Any]:
         raise
 
 
-def _inspect_filing_cover_page(cik: str, accession_number: str) -> dict[str, Any]:
+def _inspect_filing_cover_page(
+    cik: str,
+    accession_number: str,
+    user_agent: str | None = None,
+) -> dict[str, Any]:
     """
     Reads the filing's index.json and primary_doc.xml cover page to find the information table
     XML filename, amendmentType (RESTATEMENT vs NEW HOLDINGS), tableEntryTotal, and tableValueTotal.
@@ -64,7 +69,7 @@ def _inspect_filing_cover_page(cik: str, accession_number: str) -> dict[str, Any
     cik_int = str(int(cik))
     acc_no_hyphens = accession_number.replace("-", "")
     index_url = f"{EDGAR_BASE_URL}/data/{cik_int}/{acc_no_hyphens}/index.json"
-    index_data = make_request(index_url)
+    index_data = make_request(index_url, user_agent=user_agent)
 
     items = index_data.get("directory", {}).get("item", [])
     xml_files = [item.get("name", "") for item in items if item.get("name", "").endswith(".xml")]
@@ -82,7 +87,7 @@ def _inspect_filing_cover_page(cik: str, accession_number: str) -> dict[str, Any
 
     if primary_doc:
         cover_url = f"{EDGAR_BASE_URL}/data/{cik_int}/{acc_no_hyphens}/{primary_doc}"
-        cover_resp = make_request(cover_url)
+        cover_resp = make_request(cover_url, user_agent=user_agent)
         try:
             root = ET.fromstring(cover_resp["text"])
             is_amd = root.findtext(".//n:isAmendment", default="false", namespaces=COVER_NS).strip().lower() == "true"
@@ -104,6 +109,7 @@ def _update_filing_periods_config(
     period: str,
     table_value_total: int | None = None,
     superseded_accessions: list[str] | None = None,
+    metadata_cache_path: str | None = None,
 ) -> None:
     """Updates FILING_PERIODS and COVER_PAGE_TOTALS in memory, on disk, and in config.py."""
     for old_acc in superseded_accessions or []:
@@ -115,12 +121,13 @@ def _update_filing_periods_config(
         COVER_PAGE_TOTALS[accession] = table_value_total
 
     # Persist metadata JSON
-    os.makedirs(os.path.dirname(METADATA_CACHE_PATH), exist_ok=True)
+    resolved_cache_path = metadata_cache_path or os.path.join(config.DATA_DIR, "mappings", "filing_metadata.json")
+    os.makedirs(os.path.dirname(resolved_cache_path), exist_ok=True)
     meta_store = {
         "filing_periods": dict(FILING_PERIODS),
         "cover_page_totals": dict(COVER_PAGE_TOTALS),
     }
-    with open(METADATA_CACHE_PATH, "w", encoding="utf-8") as f:
+    with open(resolved_cache_path, "w", encoding="utf-8") as f:
         json.dump(meta_store, f, indent=2, sort_keys=True)
 
     # Also update FILING_PERIODS and COVER_PAGE_TOTALS literals in config.py
@@ -150,7 +157,13 @@ def _update_filing_periods_config(
             f.write(content)
 
 
-def get_fund_filings(cik: str, year: int, quarter: int) -> list[dict[str, Any]]:
+def get_fund_filings(
+    cik: str,
+    year: int,
+    quarter: int,
+    raw_dir: str | None = None,
+    user_agent: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Fetches the list of 13F-HR (and 13F-HR/A amendment) filings for a CIK in a given quarter
     from the SEC submissions endpoint.
@@ -162,14 +175,17 @@ def get_fund_filings(cik: str, year: int, quarter: int) -> list[dict[str, Any]]:
         cik (str): Central Index Key of the fund.
         year (int): The reporting year.
         quarter (int): The reporting quarter (1-4).
+        raw_dir (str | None): Optional directory for raw XML files (defaults to <DATA_DIR>/raw).
+        user_agent (str | None): Optional SEC User-Agent header override.
         
     Returns:
         list[dict]: List of dictionaries with keys: accession_number, filed_date, period_of_report,
                     form, amendment_type, table_entry_total, table_value_total, infotable_doc.
     """
+    resolved_raw_dir = raw_dir or os.path.join(config.DATA_DIR, "raw")
     padded_cik = cik.zfill(10)
     url = f"{SEC_BASE_URL}/submissions/CIK{padded_cik}.json"
-    data = make_request(url)
+    data = make_request(url, user_agent=user_agent)
 
     recent = data.get("filings", {}).get("recent", {})
     forms = recent.get("form", [])
@@ -185,7 +201,7 @@ def get_fund_filings(cik: str, year: int, quarter: int) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for form, acc, f_date, r_date in zip(forms, accessions, filing_dates, report_dates):
         if form in ("13F-HR", "13F-HR/A") and str(r_date).startswith(target_prefix):
-            cover_info = _inspect_filing_cover_page(padded_cik, acc)
+            cover_info = _inspect_filing_cover_page(padded_cik, acc, user_agent=user_agent)
             candidates.append(
                 {
                     "accession_number": acc,
@@ -218,9 +234,9 @@ def get_fund_filings(cik: str, year: int, quarter: int) -> list[dict[str, Any]]:
             latest_restatement["filed_date"],
             superseded,
         )
-        # Remove any superseded raw XML files from data/raw/ so they are not parsed alongside the restatement
+        # Remove any superseded raw XML files from raw_dir so they are not parsed alongside the restatement
         for old_acc in superseded:
-            old_path = os.path.join("data", "raw", f"{padded_cik}_{old_acc}.xml")
+            old_path = os.path.join(resolved_raw_dir, f"{padded_cik}_{old_acc}.xml")
             if os.path.exists(old_path):
                 os.remove(old_path)
                 logger.info("Removed superseded raw XML file %s", old_path)
@@ -230,9 +246,15 @@ def get_fund_filings(cik: str, year: int, quarter: int) -> list[dict[str, Any]]:
     return candidates
 
 
-def download_filing_xml(cik: str, accession_number: str, infotable_doc: str | None = None) -> str:
+def download_filing_xml(
+    cik: str,
+    accession_number: str,
+    infotable_doc: str | None = None,
+    raw_dir: str | None = None,
+    user_agent: str | None = None,
+) -> str:
     """
-    Downloads the information table XML document (not primary_doc.xml) for a filing and saves it to data/raw/.
+    Downloads the information table XML document (not primary_doc.xml) for a filing and saves it to raw_dir.
     
     Filename format is {cik}_{accession_number}.xml.
     
@@ -240,13 +262,16 @@ def download_filing_xml(cik: str, accession_number: str, infotable_doc: str | No
         cik (str): Central Index Key of the fund.
         accession_number (str): The accession number of the filing.
         infotable_doc (str | None): Optional pre-resolved information table XML filename.
+        raw_dir (str | None): Optional directory for raw XML files (defaults to <DATA_DIR>/raw).
+        user_agent (str | None): Optional SEC User-Agent header override.
         
     Returns:
         str: The saved file path.
     """
-    os.makedirs(os.path.join("data", "raw"), exist_ok=True)
+    resolved_raw_dir = raw_dir or os.path.join(config.DATA_DIR, "raw")
+    os.makedirs(resolved_raw_dir, exist_ok=True)
     padded_cik = cik.zfill(10)
-    out_path = os.path.join("data", "raw", f"{padded_cik}_{accession_number}.xml")
+    out_path = os.path.join(resolved_raw_dir, f"{padded_cik}_{accession_number}.xml")
     if os.path.exists(out_path):
         logger.info("Filing XML already exists at %s", out_path)
         return out_path
@@ -257,7 +282,7 @@ def download_filing_xml(cik: str, accession_number: str, infotable_doc: str | No
 
     if not xml_filename:
         index_url = f"{EDGAR_BASE_URL}/data/{cik_int}/{acc_no_hyphens}/index.json"
-        index_data = make_request(index_url)
+        index_data = make_request(index_url, user_agent=user_agent)
         items = index_data.get("directory", {}).get("item", [])
         for item in items:
             name = item.get("name", "")
@@ -269,7 +294,7 @@ def download_filing_xml(cik: str, accession_number: str, infotable_doc: str | No
         raise ValueError(f"No information table XML found for {cik} / {accession_number}")
 
     xml_url = f"{EDGAR_BASE_URL}/data/{cik_int}/{acc_no_hyphens}/{xml_filename}"
-    xml_resp = make_request(xml_url)
+    xml_resp = make_request(xml_url, user_agent=user_agent)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(xml_resp["text"])
 
@@ -277,7 +302,13 @@ def download_filing_xml(cik: str, accession_number: str, infotable_doc: str | No
     return out_path
 
 
-def fetch_all_funds(year: int, quarter: int) -> None:
+def fetch_all_funds(
+    year: int,
+    quarter: int,
+    raw_dir: str | None = None,
+    user_agent: str | None = None,
+    metadata_cache_path: str | None = None,
+) -> None:
     """
     Orchestrates fetching for all funds in TARGET_FUNDS, calling get_fund_filings then download_filing_xml for each,
     and automatically updating FILING_PERIODS and COVER_PAGE_TOTALS.
@@ -286,20 +317,30 @@ def fetch_all_funds(year: int, quarter: int) -> None:
     Args:
         year (int): The reporting year.
         quarter (int): The reporting quarter (1-4).
+        raw_dir (str | None): Optional directory for raw XML files (defaults to <DATA_DIR>/raw).
+        user_agent (str | None): Optional SEC User-Agent header override.
+        metadata_cache_path (str | None): Optional path for filing_metadata.json.
     """
     period_str = f"{year}-Q{quarter}"
     for fund_name, cik in TARGET_FUNDS.items():
         logger.info("Fetching %s 13F filings for %s (%s)...", period_str, fund_name, cik)
         try:
-            filings = get_fund_filings(cik, year, quarter)
+            filings = get_fund_filings(cik, year, quarter, raw_dir=raw_dir, user_agent=user_agent)
             for filing in filings:
                 acc = filing["accession_number"]
-                download_filing_xml(cik, acc, infotable_doc=filing.get("infotable_doc"))
+                download_filing_xml(
+                    cik,
+                    acc,
+                    infotable_doc=filing.get("infotable_doc"),
+                    raw_dir=raw_dir,
+                    user_agent=user_agent,
+                )
                 _update_filing_periods_config(
                     accession=acc,
                     period=period_str,
                     table_value_total=filing.get("table_value_total"),
                     superseded_accessions=filing.get("superseded_accessions"),
+                    metadata_cache_path=metadata_cache_path,
                 )
         except Exception as exc:
             logger.error("Failed fetching filings for %s (%s): %s", fund_name, cik, exc)

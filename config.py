@@ -11,11 +11,38 @@ RATE_LIMIT_DELAY = 0.12  # Keeps requests under SEC's 10/sec limit
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "sec_13f_analyzer research@example.com")
 
 # Database Configuration
-DB_PATH = os.getenv("DB_PATH", "data/sec_13f.db")
+DATA_DIR = os.getenv("SEC_13F_DATA_DIR", "data")
+DB_PATH = os.getenv("DB_PATH", os.path.join(DATA_DIR, "sec_13f.db"))
 
 # OpenFIGI Configuration
 OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
 OPENFIGI_API_KEY = os.getenv("OPENFIGI_API_KEY", "")
+
+
+def configure(
+    *,
+    data_dir: str | None = None,
+    db_path: str | None = None,
+    user_agent: str | None = None,
+    openfigi_api_key: str | None = None,
+) -> None:
+    """
+    Runtime configuration helper allowing external callers importing sec_13f_analyzer
+    as a library to override default paths and credentials without relying on a local .env file.
+    """
+    global DATA_DIR, DB_PATH, SEC_USER_AGENT, OPENFIGI_API_KEY
+    if data_dir is not None:
+        DATA_DIR = str(data_dir)
+        if db_path is None:
+            DB_PATH = os.path.join(DATA_DIR, "sec_13f.db")
+    if db_path is not None:
+        DB_PATH = str(db_path)
+    if user_agent is not None:
+        SEC_USER_AGENT = str(user_agent)
+        os.environ["SEC_USER_AGENT"] = str(user_agent)
+    if openfigi_api_key is not None:
+        OPENFIGI_API_KEY = str(openfigi_api_key)
+        os.environ["OPENFIGI_API_KEY"] = str(openfigi_api_key)
 
 # Target Funds for Analysis (7 verified institutional managers: hedge, conglomerate, pension, SWF)
 # Verified against https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=<cik>&type=13F-HR

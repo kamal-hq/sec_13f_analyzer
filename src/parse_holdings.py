@@ -7,6 +7,7 @@ import os
 from typing import Any
 import xml.etree.ElementTree as ET
 import pandas as pd
+import config
 from config import FILING_PERIODS, TARGET_FUNDS
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,11 @@ def parse_xml_file(file_path: str) -> list[dict[str, Any]]:
     return holdings
 
 
-def extract_fund_metadata(file_path: str) -> dict[str, str]:
+def extract_fund_metadata(
+    file_path: str,
+    filing_periods: dict[str, str] | None = None,
+    target_funds: dict[str, str] | None = None,
+) -> dict[str, str]:
     """
     Extracts the fund CIK, accession number, fund name, and report period from the filename
     ({cik}_{accession}.xml) and the FILING_PERIODS mapping in config.py, because raw files
@@ -85,6 +90,8 @@ def extract_fund_metadata(file_path: str) -> dict[str, str]:
     
     Args:
         file_path (str): Path to the XML file.
+        filing_periods (dict[str, str] | None): Optional accession -> period mapping override.
+        target_funds (dict[str, str] | None): Optional fund_name -> cik mapping override.
         
     Returns:
         dict: A dictionary containing fund metadata (cik, fund_cik, fund_name, accession_number, period).
@@ -96,12 +103,17 @@ def extract_fund_metadata(file_path: str) -> dict[str, str]:
 
     cik, accession = stem.split("_", 1)
     cik = cik.zfill(10)
-    period = FILING_PERIODS.get(accession)
+    periods_map = filing_periods if filing_periods is not None else FILING_PERIODS
+    period = periods_map.get(accession)
     if period is None:
         logger.warning("Accession %s not found in FILING_PERIODS; defaulting to UNKNOWN", accession)
         period = "UNKNOWN"
 
-    fund_name = CIK_TO_FUND_NAME.get(cik, f"CIK {cik}")
+    if target_funds is not None:
+        cik_map = {v.zfill(10): k for k, v in target_funds.items()}
+    else:
+        cik_map = CIK_TO_FUND_NAME
+    fund_name = cik_map.get(cik, f"CIK {cik}")
     return {
         "cik": cik,
         "fund_cik": cik,
@@ -201,26 +213,35 @@ def validate_parsed_data(df: pd.DataFrame) -> pd.DataFrame:
     return cleaned.reset_index(drop=True)
 
 
-def parse_all_raw_files(raw_dir: str = "data/raw") -> pd.DataFrame:
+def parse_all_raw_files(
+    raw_dir: str | None = None,
+    filing_periods: dict[str, str] | None = None,
+    target_funds: dict[str, str] | None = None,
+) -> pd.DataFrame:
     """
-    Iterates all .xml files in data/raw/, calls parse_xml_file and extract_fund_metadata for each,
+    Iterates all .xml files in raw_dir (defaults to <DATA_DIR>/raw), calls parse_xml_file and extract_fund_metadata for each,
     combines the extracted data into a single DataFrame with a fund_cik column added,
     and aggregates per (fund, period, cusip, put_call) by summing value and shares.
     
     Returns:
         pd.DataFrame: A DataFrame containing all validated and aggregated holdings and fund metadata.
     """
-    if not os.path.exists(raw_dir):
-        logger.warning("Raw directory %s does not exist.", raw_dir)
+    resolved_raw_dir = raw_dir or os.path.join(config.DATA_DIR, "raw")
+    if not os.path.exists(resolved_raw_dir):
+        logger.warning("Raw directory %s does not exist.", resolved_raw_dir)
         return pd.DataFrame()
 
     xml_files = sorted(
-        os.path.join(raw_dir, f) for f in os.listdir(raw_dir) if f.lower().endswith(".xml")
+        os.path.join(resolved_raw_dir, f) for f in os.listdir(resolved_raw_dir) if f.lower().endswith(".xml")
     )
     all_dfs: list[pd.DataFrame] = []
 
     for file_path in xml_files:
-        meta = extract_fund_metadata(file_path)
+        meta = extract_fund_metadata(
+            file_path,
+            filing_periods=filing_periods,
+            target_funds=target_funds,
+        )
         records = parse_xml_file(file_path)
         if not records:
             continue

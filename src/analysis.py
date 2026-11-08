@@ -6,19 +6,23 @@ import logging
 import os
 import sqlite3
 import pandas as pd
+import config
 from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
 
-def get_connection() -> sqlite3.Connection:
+def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     """
-    Returns a SQLite connection to DB_PATH with row_factory set to sqlite3.Row.
+    Returns a SQLite connection to db_path (or config.DB_PATH) with row_factory set to sqlite3.Row.
     
+    Args:
+        db_path (str | None): Optional SQLite database file path override.
+        
     Returns:
         sqlite3.Connection: Database connection object.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path or config.DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -91,6 +95,7 @@ def get_convergence_signals(
     fund_types: list[str] | None = None,
     include_etfs: bool = False,
     include_new_listings: bool = False,
+    db_path: str | None = None,
 ) -> pd.DataFrame:
     """
     Identifies Smart Money Convergence signals for a reporting period on split-adjusted shares,
@@ -111,6 +116,7 @@ def get_convergence_signals(
         fund_types (list[str] | None): Optional list of fund_type values to filter Dim_Fund.
         include_etfs (bool): If False (default), excludes ETFs and index trusts.
         include_new_listings (bool): If False (default), excludes new listings (is_new_listing = 1).
+        db_path (str | None): Optional SQLite database file path override.
 
     Returns:
         pd.DataFrame: Convergence signals with columns:
@@ -118,7 +124,7 @@ def get_convergence_signals(
             hedge_fund_buyers, discretionary_buyers, buyer_mix,
             funds, total_dollars_added, fund_type_breakdown.
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         fund_type_clause = ""
         params: list = [period, period, min_pct_increase, min_added_value]
 
@@ -286,13 +292,14 @@ def get_new_to_sample_signals(
     period: str = "2026-Q2",
     min_funds: int = 3,
     min_added_value: int = 1_000_000,
+    db_path: str | None = None,
 ) -> pd.DataFrame:
     """
     Returns "New to the sample (no prior-quarter holders)" signals (where is_new_listing = 1,
     meaning NO fund in the sample held the security or issuer in the prior period) accumulated
     by min_funds or more institutions in the given period.
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         query = f"""
             WITH prior_period AS (
                 SELECT MAX(period) AS prev_period
@@ -384,12 +391,13 @@ def get_etf_convergence_signals(
     min_funds: int = 3,
     min_pct_increase: float = 0.10,
     min_added_value: int = 1_000_000,
+    db_path: str | None = None,
 ) -> pd.DataFrame:
     """
     Returns ETFs and index trusts accumulated by min_funds or more institutions in the given period
     using the same buyer criteria (>=10% share increase or NEW, >=$1M added, excluding options).
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         query = f"""
             WITH prior_period AS (
                 SELECT MAX(period) AS prev_period
@@ -463,13 +471,14 @@ def get_etf_convergence_signals(
         )
 
 
-def get_qoq_new_positions(period: str) -> pd.DataFrame:
+def get_qoq_new_positions(period: str, db_path: str | None = None) -> pd.DataFrame:
     """
     Returns all holdings where qoq_change_flag = 'NEW' for the given period,
     joined with fund and security names.
     
     Args:
         period (str): The reporting period.
+        db_path (str | None): Optional SQLite database file path override.
         
     Returns:
         pd.DataFrame: A DataFrame containing the new positions.
@@ -494,17 +503,18 @@ def get_qoq_new_positions(period: str) -> pd.DataFrame:
           AND h.value_usd > 0
         ORDER BY h.value_usd DESC
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         return pd.read_sql_query(query, conn, params=(period,))
 
 
-def get_qoq_exited_positions(period: str) -> pd.DataFrame:
+def get_qoq_exited_positions(period: str, db_path: str | None = None) -> pd.DataFrame:
     """
     Returns all holdings where qoq_change_flag = 'EXITED' for the given period,
     joined with prior-quarter shares and dollar value.
 
     Args:
         period (str): The reporting period (e.g., '2026-Q2').
+        db_path (str | None): Optional SQLite database file path override.
 
     Returns:
         pd.DataFrame: Exited positions ranked by prior-quarter value_usd descending.
@@ -538,11 +548,15 @@ def get_qoq_exited_positions(period: str) -> pd.DataFrame:
           AND h.qoq_change_flag = 'EXITED'
         ORDER BY prev.value_usd DESC
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         return pd.read_sql_query(query, conn, params=(period, period))
 
 
-def get_top_holdings_by_aum(period: str, top_n: int = 20) -> pd.DataFrame:
+def get_top_holdings_by_aum(
+    period: str,
+    top_n: int = 20,
+    db_path: str | None = None,
+) -> pd.DataFrame:
     """
     Returns top N securities ranked by total value_usd across all funds for a given period,
     excluding EXITED positions and options.
@@ -550,6 +564,7 @@ def get_top_holdings_by_aum(period: str, top_n: int = 20) -> pd.DataFrame:
     Args:
         period (str): The reporting period.
         top_n (int): Number of top holdings to return. Defaults to 20.
+        db_path (str | None): Optional SQLite database file path override.
         
     Returns:
         pd.DataFrame: A DataFrame of top holdings by AUM.
@@ -575,11 +590,15 @@ def get_top_holdings_by_aum(period: str, top_n: int = 20) -> pd.DataFrame:
         ORDER BY total_aum DESC
         LIMIT ?
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         return pd.read_sql_query(query, conn, params=(period, top_n))
 
 
-def get_fund_concentration(fund_name: str, period: str) -> pd.DataFrame:
+def get_fund_concentration(
+    fund_name: str,
+    period: str,
+    db_path: str | None = None,
+) -> pd.DataFrame:
     """
     Returns the top 10 positions for a specific fund as a percentage of that fund's total portfolio value,
     excluding EXITED positions.
@@ -587,6 +606,7 @@ def get_fund_concentration(fund_name: str, period: str) -> pd.DataFrame:
     Args:
         fund_name (str): The name of the fund.
         period (str): The reporting period.
+        db_path (str | None): Optional SQLite database file path override.
         
     Returns:
         pd.DataFrame: A DataFrame detailing the fund's concentration.
@@ -612,11 +632,11 @@ def get_fund_concentration(fund_name: str, period: str) -> pd.DataFrame:
         ORDER BY h.value_usd DESC
         LIMIT 10
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         return pd.read_sql_query(query, conn, params=(fund_name, period))
 
 
-def get_aum_by_period() -> pd.DataFrame:
+def get_aum_by_period(db_path: str | None = None) -> pd.DataFrame:
     """
     Computes total institutional AUM per period with and without option positions.
 
@@ -639,11 +659,11 @@ def get_aum_by_period() -> pd.DataFrame:
         GROUP BY h.period
         ORDER BY h.period
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         return pd.read_sql_query(query, conn)
 
 
-def get_fund_summary() -> pd.DataFrame:
+def get_fund_summary(db_path: str | None = None) -> pd.DataFrame:
     """
     Produces a fund-by-period summary table for Power BI (output/fund_summary.csv),
     including total AUM with and without options, active position counts, QoQ activity breakdown,
@@ -695,11 +715,11 @@ def get_fund_summary() -> pd.DataFrame:
         GROUP BY f.fund_id, f.name, f.cik, f.fund_type, h.period, t.top_10_concentration_pct
         ORDER BY h.period, total_aum_with_options_usd DESC
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         return pd.read_sql_query(query, conn)
 
 
-def get_fund_aum() -> pd.DataFrame:
+def get_fund_aum(db_path: str | None = None) -> pd.DataFrame:
     """
     Produces a long-format fund AUM table per period for Power BI (output/fund_aum.csv),
     with columns: period, fund, fund_type, aum_with_options, aum_equity_only.
@@ -721,11 +741,11 @@ def get_fund_aum() -> pd.DataFrame:
         GROUP BY h.period, f.fund_id, f.name, f.fund_type
         ORDER BY h.period ASC, aum_with_options DESC
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         return pd.read_sql_query(query, conn)
 
 
-def get_sector_by_period() -> pd.DataFrame:
+def get_sector_by_period(db_path: str | None = None) -> pd.DataFrame:
     """
     Produces a long-format sector-by-period breakdown of institutional common-equity AUM
     (output/sector_by_period.csv), with columns: period, sector, value_usd, fund_count.
@@ -747,24 +767,33 @@ def get_sector_by_period() -> pd.DataFrame:
         GROUP BY h.period, s.sector
         ORDER BY h.period ASC, value_usd DESC
     """
-    with get_connection() as conn:
+    with get_connection(db_path=db_path) as conn:
         return pd.read_sql_query(query, conn)
 
 
-def export_to_csv(df: pd.DataFrame, filename: str) -> None:
+def export_to_csv(
+    df: pd.DataFrame,
+    filename: str,
+    output_dir: str = "output",
+    copy_to_dashboard: bool | None = None,
+) -> None:
     """
-    Saves DataFrame to the output/ folder (gitignored) and copies to dashboard/data/ (tracked in git).
+    Saves DataFrame to output_dir (defaults to output/, gitignored) and copies to dashboard/data/
+    when exporting to the default output directory.
     
     Args:
         df (pd.DataFrame): Data to export.
         filename (str): Name of the CSV file.
+        output_dir (str): Output directory for CSV files. Defaults to 'output'.
+        copy_to_dashboard (bool | None): If True (or None when output_dir == 'output'), also copies to dashboard/data/.
     """
-    os.makedirs("output", exist_ok=True)
-    out_path = filename if os.path.dirname(filename) else os.path.join("output", filename)
+    os.makedirs(output_dir, exist_ok=True)
+    out_path = filename if os.path.dirname(filename) else os.path.join(output_dir, filename)
     df.to_csv(out_path, index=False)
     logger.info("Exported %d rows to %s", len(df), out_path)
 
-    if not os.path.dirname(filename):
+    should_copy = copy_to_dashboard if copy_to_dashboard is not None else (output_dir == "output" and not os.path.dirname(filename))
+    if should_copy and not os.path.dirname(filename):
         dashboard_dir = os.path.join("dashboard", "data")
         os.makedirs(dashboard_dir, exist_ok=True)
         dashboard_path = os.path.join(dashboard_dir, filename)

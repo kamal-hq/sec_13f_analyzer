@@ -30,24 +30,44 @@ DISCRETIONARY_FUND_TYPES = [
 ]
 
 
-def run_pipeline() -> pd.DataFrame:
+def run_pipeline(
+    data_dir: str = "data",
+    db_path: str | None = None,
+    output_dir: str = "output",
+    user_agent: str | None = None,
+) -> pd.DataFrame:
     """
     Executes the full 13F data pipeline:
-    1. Parse and aggregate raw 13F XML files from data/raw/
+    1. Parse and aggregate raw 13F XML files from <data_dir>/raw/
     2. Map unique CUSIPs to tickers/names via OpenFIGI + cache, and map tickers to SIC sectors
     3. Detect stock splits (confirming via yfinance + split_cache.json), load funds, securities, and split-adjusted holdings into SQLite
-    4. Export Power BI CSVs to output/
+    4. Export Power BI CSVs to <output_dir>/
     
+    Args:
+        data_dir (str): Root data directory containing raw/, mappings/, and processed/. Defaults to 'data'.
+        db_path (str | None): Optional SQLite database file path. Defaults to <data_dir>/sec_13f.db (or config.DB_PATH when data_dir=='data').
+        output_dir (str): Output directory for exported CSVs. Defaults to 'output'.
+        user_agent (str | None): Optional SEC User-Agent header override.
+        
     Returns:
         pd.DataFrame: The parsed and mapped DataFrame loaded into the database.
     """
-    logger.info("Step 1/4: Parsing and aggregating raw 13F XML files...")
-    df = parse_all_raw_files()
+    import config
+
+    resolved_db_path = db_path or (config.DB_PATH if data_dir == "data" else os.path.join(data_dir, "sec_13f.db"))
+    raw_dir = os.path.join(data_dir, "raw")
+    mappings_dir = os.path.join(data_dir, "mappings")
+    cusip_cache_path = os.path.join(mappings_dir, "cusip_cache.json")
+    sector_cache_path = os.path.join(mappings_dir, "sector_cache.json")
+    split_cache_path = os.path.join(mappings_dir, "split_cache.json")
+
+    logger.info("Step 1/4: Parsing and aggregating raw 13F XML files from %s...", raw_dir)
+    df = parse_all_raw_files(raw_dir=raw_dir)
     df = validate_parsed_data(df)
 
     logger.info("Step 2/4: Mapping %d unique CUSIPs and resolving SIC sectors...", df["cusip"].nunique())
     unique_cusips = df["cusip"].unique().tolist()
-    cusip_map = map_cusips(unique_cusips)
+    cusip_map = map_cusips(unique_cusips, cache_path=cusip_cache_path)
 
     df["ticker"] = df["cusip"].map(lambda c: cusip_map.get(c, {}).get("ticker"))
     # Prefer OpenFIGI canonical company name when available, falling back to 13F XML issuer_name
@@ -58,36 +78,50 @@ def run_pipeline() -> pd.DataFrame:
     # Preserve raw 13F titleOfClass as security_class and map ticker SIC codes to broad sectors
     df["security_class"] = df["title_of_class"]
     unique_tickers = [t for t in df["ticker"].dropna().unique().tolist() if t]
-    sector_map = map_sectors(unique_tickers)
+    sector_map = map_sectors(unique_tickers, cache_path=sector_cache_path, user_agent=user_agent)
     df["sector"] = df["ticker"].map(
         lambda t: sector_map.get(str(t).upper(), "Unknown") if pd.notna(t) and t else "Unknown"
     )
 
-    os.makedirs(os.path.join("data", "processed"), exist_ok=True)
-    processed_path = os.path.join("data", "processed", "holdings_mapped.csv")
+    processed_dir = os.path.join(data_dir, "processed")
+    os.makedirs(processed_dir, exist_ok=True)
+    processed_path = os.path.join(processed_dir, "holdings_mapped.csv")
     df.to_csv(processed_path, index=False)
     logger.info("Saved mapped holdings to %s", processed_path)
 
-    logger.info("Step 3/4: Creating database schema and loading star schema tables...")
-    create_schema()
-    bulk_insert_holdings(df)
+    logger.info("Step 3/4: Creating database schema and loading star schema tables into %s...", resolved_db_path)
+    create_schema(db_path=resolved_db_path)
+    bulk_insert_holdings(df, db_path=resolved_db_path, split_cache_path=split_cache_path)
 
-    with get_connection() as conn:
+    with get_connection(db_path=resolved_db_path) as conn:
         for table in ("Dim_Fund", "Dim_Security", "Fact_Holdings"):
             count = conn.execute(f"SELECT COUNT(*) AS cnt FROM {table}").fetchone()["cnt"]
             logger.info("Table %s row count: %d", table, count)
 
-    logger.info("Step 4/4: Exporting Power BI CSVs to output/ and dashboard/data/...")
-    export_to_csv(get_convergence_signals("2026-Q2", min_funds=4), "convergence_signals.csv")
+    logger.info("Step 4/4: Exporting Power BI CSVs to %s...", output_dir)
     export_to_csv(
-        get_convergence_signals("2026-Q2", fund_types=DISCRETIONARY_FUND_TYPES),
-        "discretionary_signals.csv",
+        get_convergence_signals("2026-Q2", min_funds=4, db_path=resolved_db_path),
+        "convergence_signals.csv",
+        output_dir=output_dir,
     )
-    export_to_csv(get_new_to_sample_signals("2026-Q2", min_funds=3), "new_positions_signals.csv")
-    export_to_csv(get_top_holdings_by_aum("2026-Q2", top_n=50), "top_holdings.csv")
-    export_to_csv(get_fund_aum(), "fund_aum.csv")
-    export_to_csv(get_fund_summary(), "fund_summary.csv")
-    export_to_csv(get_sector_by_period(), "sector_by_period.csv")
+    export_to_csv(
+        get_convergence_signals("2026-Q2", fund_types=DISCRETIONARY_FUND_TYPES, db_path=resolved_db_path),
+        "discretionary_signals.csv",
+        output_dir=output_dir,
+    )
+    export_to_csv(
+        get_new_to_sample_signals("2026-Q2", min_funds=3, db_path=resolved_db_path),
+        "new_positions_signals.csv",
+        output_dir=output_dir,
+    )
+    export_to_csv(
+        get_top_holdings_by_aum("2026-Q2", top_n=50, db_path=resolved_db_path),
+        "top_holdings.csv",
+        output_dir=output_dir,
+    )
+    export_to_csv(get_fund_aum(db_path=resolved_db_path), "fund_aum.csv", output_dir=output_dir)
+    export_to_csv(get_fund_summary(db_path=resolved_db_path), "fund_summary.csv", output_dir=output_dir)
+    export_to_csv(get_sector_by_period(db_path=resolved_db_path), "sector_by_period.csv", output_dir=output_dir)
 
     return df
 

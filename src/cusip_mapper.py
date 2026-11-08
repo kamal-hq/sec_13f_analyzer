@@ -9,6 +9,7 @@ import os
 import time
 from typing import Any
 import requests
+import config
 from config import OPENFIGI_API_KEY, OPENFIGI_URL, RATE_LIMIT_DELAY, SEC_BASE_URL, SEC_USER_AGENT
 
 logger = logging.getLogger(__name__)
@@ -138,34 +139,41 @@ TICKER_SECTOR_OVERRIDES: dict[str, str] = {
 }
 
 
-def load_sector_cache(cache_path: str = SECTOR_CACHE_PATH) -> dict[str, dict[str, Any]]:
-    """Loads existing ticker -> SIC/sector mappings from data/mappings/sector_cache.json."""
-    if not os.path.exists(cache_path):
+def load_sector_cache(cache_path: str | None = None) -> dict[str, dict[str, Any]]:
+    """Loads existing ticker -> SIC/sector mappings from sector_cache.json."""
+    resolved_path = cache_path or os.path.join(config.DATA_DIR, "mappings", "sector_cache.json")
+    if not os.path.exists(resolved_path):
         return {}
     try:
-        with open(cache_path, "r", encoding="utf-8") as f:
+        with open(resolved_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to load sector cache from %s: %s", cache_path, exc)
+        logger.warning("Failed to load sector cache from %s: %s", resolved_path, exc)
         return {}
 
 
-def save_sector_cache(mapping: dict[str, dict[str, Any]], cache_path: str = SECTOR_CACHE_PATH) -> None:
-    """Writes the full sector cache dict to data/mappings/sector_cache.json."""
-    cache_dir = os.path.dirname(cache_path)
+def save_sector_cache(mapping: dict[str, dict[str, Any]], cache_path: str | None = None) -> None:
+    """Writes the full sector cache dict to sector_cache.json."""
+    resolved_path = cache_path or os.path.join(config.DATA_DIR, "mappings", "sector_cache.json")
+    cache_dir = os.path.dirname(resolved_path)
     if cache_dir:
         os.makedirs(cache_dir, exist_ok=True)
-    with open(cache_path, "w", encoding="utf-8") as f:
+    with open(resolved_path, "w", encoding="utf-8") as f:
         json.dump(mapping, f, indent=2, sort_keys=True)
 
 
-def map_sectors(tickers: list[str], fetch_uncached: bool = False) -> dict[str, str]:
+def map_sectors(
+    tickers: list[str],
+    fetch_uncached: bool = False,
+    cache_path: str | None = None,
+    user_agent: str | None = None,
+) -> dict[str, str]:
     """
     Maps tickers to broad sector groups using the SEC submissions API SIC code cached in
     data/mappings/sector_cache.json, with 'Unknown' as fallback.
     """
-    sector_cache = load_sector_cache()
+    sector_cache = load_sector_cache(cache_path=cache_path)
     unique_tickers = [str(t).strip().upper() for t in dict.fromkeys(tickers) if t and str(t).strip() and str(t) != "None"]
 
     # Ensure every entry in sector_cache has its computed broad sector field
@@ -183,7 +191,8 @@ def map_sectors(tickers: list[str], fetch_uncached: bool = False) -> dict[str, s
     if fetch_uncached:
         uncached = [t for t in unique_tickers if t not in sector_cache]
         if uncached:
-            headers = {"User-Agent": os.getenv("SEC_USER_AGENT", SEC_USER_AGENT), "Accept-Encoding": "gzip, deflate"}
+            resolved_ua = user_agent or os.getenv("SEC_USER_AGENT", config.SEC_USER_AGENT)
+            headers = {"User-Agent": resolved_ua, "Accept-Encoding": "gzip, deflate"}
             try:
                 resp = _SESSION.get("https://www.sec.gov/files/company_tickers.json", headers=headers, timeout=30)
                 resp.raise_for_status()
@@ -211,7 +220,7 @@ def map_sectors(tickers: list[str], fetch_uncached: bool = False) -> dict[str, s
                 logger.warning("Could not fetch uncached SEC SIC codes: %s", exc)
 
     if updated:
-        save_sector_cache(sector_cache)
+        save_sector_cache(sector_cache, cache_path=cache_path)
 
     result: dict[str, str] = {}
     for t in unique_tickers:
@@ -229,35 +238,37 @@ def map_sectors(tickers: list[str], fetch_uncached: bool = False) -> dict[str, s
     return result
 
 
-def load_cusip_cache(cache_path: str = CACHE_PATH) -> dict[str, dict[str, str | None]]:
+def load_cusip_cache(cache_path: str | None = None) -> dict[str, dict[str, str | None]]:
     """
     Loads existing CUSIP mappings from data/mappings/cusip_cache.json.
     
     Returns:
         dict: The loaded CUSIP mapping. Returns an empty dict if the file does not exist.
     """
-    if not os.path.exists(cache_path):
+    resolved_path = cache_path or os.path.join(config.DATA_DIR, "mappings", "cusip_cache.json")
+    if not os.path.exists(resolved_path):
         return {}
     try:
-        with open(cache_path, "r", encoding="utf-8") as f:
+        with open(resolved_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to load CUSIP cache from %s: %s", cache_path, exc)
+        logger.warning("Failed to load CUSIP cache from %s: %s", resolved_path, exc)
         return {}
 
 
-def save_cusip_cache(mapping: dict[str, dict[str, str | None]], cache_path: str = CACHE_PATH) -> None:
+def save_cusip_cache(mapping: dict[str, dict[str, str | None]], cache_path: str | None = None) -> None:
     """
     Writes the full mapping dict to data/mappings/cusip_cache.json.
     
     Args:
         mapping (dict): The dictionary containing CUSIP mappings.
     """
-    cache_dir = os.path.dirname(cache_path)
+    resolved_path = cache_path or os.path.join(config.DATA_DIR, "mappings", "cusip_cache.json")
+    cache_dir = os.path.dirname(resolved_path)
     if cache_dir:
         os.makedirs(cache_dir, exist_ok=True)
-    with open(cache_path, "w", encoding="utf-8") as f:
+    with open(resolved_path, "w", encoding="utf-8") as f:
         json.dump(mapping, f, indent=2, sort_keys=True)
 
 
@@ -329,7 +340,7 @@ def _post_openfigi_batch(
     return {c: {"ticker": None, "name": None, "security_type": None} for c in batch}
 
 
-def fetch_from_openfigi(cusips: list[str]) -> dict[str, dict[str, str | None]]:
+def fetch_from_openfigi(cusips: list[str], api_key: str | None = None) -> dict[str, dict[str, str | None]]:
     """
     Sends a batch of up to 100 CUSIPs to the OpenFIGI API.
     
@@ -338,6 +349,7 @@ def fetch_from_openfigi(cusips: list[str]) -> dict[str, dict[str, str | None]]:
     
     Args:
         cusips (list[str]): A list of CUSIPs to fetch mappings for.
+        api_key (str | None): Optional OpenFIGI API key override.
         
     Returns:
         dict: A dictionary mapping CUSIPs to their details: {cusip: {ticker, name, security_type}}.
@@ -347,14 +359,18 @@ def fetch_from_openfigi(cusips: list[str]) -> dict[str, dict[str, str | None]]:
 
     batch = cusips[:100]
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    api_key = os.getenv("OPENFIGI_API_KEY", OPENFIGI_API_KEY).strip()
-    if api_key:
-        headers["X-OPENFIGI-APIKEY"] = api_key
+    resolved_key = (api_key if api_key is not None else os.getenv("OPENFIGI_API_KEY", config.OPENFIGI_API_KEY)).strip()
+    if resolved_key:
+        headers["X-OPENFIGI-APIKEY"] = resolved_key
 
     return _post_openfigi_batch(batch, headers=headers)
 
 
-def map_cusips(cusips: list[str]) -> dict[str, dict[str, str | None]]:
+def map_cusips(
+    cusips: list[str],
+    cache_path: str | None = None,
+    api_key: str | None = None,
+) -> dict[str, dict[str, str | None]]:
     """
     Main entry point for CUSIP mapping.
     
@@ -363,26 +379,28 @@ def map_cusips(cusips: list[str]) -> dict[str, dict[str, str | None]]:
     
     Args:
         cusips (list[str]): A list of all CUSIPs needed.
+        cache_path (str | None): Optional path to cusip_cache.json.
+        api_key (str | None): Optional OpenFIGI API key override.
         
     Returns:
         dict: Complete mapping for all requested CUSIPs.
     """
-    cache = load_cusip_cache()
+    cache = load_cusip_cache(cache_path=cache_path)
     unique_cusips = list(dict.fromkeys(c.strip().upper() for c in cusips if c and str(c).strip()))
     uncached = [c for c in unique_cusips if c not in cache]
 
     if uncached:
-        api_key = os.getenv("OPENFIGI_API_KEY", OPENFIGI_API_KEY).strip()
+        resolved_key = (api_key if api_key is not None else os.getenv("OPENFIGI_API_KEY", config.OPENFIGI_API_KEY)).strip()
         # OpenFIGI allows 100 jobs/request with an API key, 10 jobs/request without
-        batch_size = 100 if api_key else 10
-        delay_sec = 0.25 if api_key else 2.4
+        batch_size = 100 if resolved_key else 10
+        delay_sec = 0.25 if resolved_key else 2.4
 
         logger.info("Fetching %d uncached CUSIPs from OpenFIGI (batch_size=%d)...", len(uncached), batch_size)
         for i in range(0, len(uncached), batch_size):
             batch = uncached[i : i + batch_size]
-            batch_result = fetch_from_openfigi(batch)
+            batch_result = fetch_from_openfigi(batch, api_key=api_key)
             cache.update(batch_result)
-            save_cusip_cache(cache)
+            save_cusip_cache(cache, cache_path=cache_path)
             if i + batch_size < len(uncached):
                 time.sleep(delay_sec)
     else:
